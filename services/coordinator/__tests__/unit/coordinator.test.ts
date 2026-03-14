@@ -739,7 +739,10 @@ describe('S3.3.5 Regression: PRICE_UPDATES Consumer', () => {
       'stream:swap-events',
       'stream:volume-aggregates',
       'stream:price-updates', // S3.3.5 FIX: Must be included
-      'stream:execution-results' // OP-10 FIX: Must be included
+      'stream:execution-results', // OP-10 FIX: Must be included
+      'stream:dead-letter-queue', // P0 ES-003: DLQ consumer group
+      'stream:forwarding-dlq', // P1 DF-004: Forwarding DLQ
+      'stream:service-degradation', // C-02: Service degradation events
     ];
 
     // Simulate consumer group configuration check
@@ -750,7 +753,10 @@ describe('S3.3.5 Regression: PRICE_UPDATES Consumer', () => {
       { streamName: 'stream:swap-events' },
       { streamName: 'stream:volume-aggregates' },
       { streamName: 'stream:price-updates' },
-      { streamName: 'stream:execution-results' }
+      { streamName: 'stream:execution-results' },
+      { streamName: 'stream:dead-letter-queue' },
+      { streamName: 'stream:forwarding-dlq' },
+      { streamName: 'stream:service-degradation' },
     ];
 
     const configuredStreams = consumerGroups.map(g => g.streamName);

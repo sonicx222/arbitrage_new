@@ -524,101 +524,35 @@ export class CoordinatorService implements CoordinatorStateProvider {
       setIsActivating: (value) => { this.isActivating = value; },
     });
 
-    // Define consumer groups for all streams we need to consume
-    // Includes swap-events, volume-aggregates, and price-updates for analytics and monitoring
-    //
-    // P1-3 DESIGN NOTE: startId: '$' (only new messages) is INTENTIONAL for a trading system:
+    // Define consumer groups for all streams we need to consume.
+    // P1-3 DESIGN NOTE: startId '$' (only new messages) is INTENTIONAL for a trading system:
     // - Stale opportunities are dangerous to execute (prices may have moved)
     // - Stale price updates would corrupt our price state
     // - Processing old messages after restart could cause bad trades
     // If messages arrive during coordinator downtime, they're intentionally skipped.
     // Use recoverPendingMessages() for messages that were being processed during crash.
-    this.consumerGroups = [
-      {
-        streamName: RedisStreamsClient.STREAMS.HEALTH,
-        groupName: this.config.consumerGroup,
-        consumerName: this.config.consumerId,
-        startId: '$', // Only new messages - stale health data not useful
-        resetToStartIdOnExistingGroup: true
-      },
-      {
-        streamName: RedisStreamsClient.STREAMS.OPPORTUNITIES,
-        groupName: this.config.consumerGroup,
-        consumerName: this.config.consumerId,
-        startId: '$',
-        resetToStartIdOnExistingGroup: true
-      },
-      {
-        streamName: RedisStreamsClient.STREAMS.WHALE_ALERTS,
-        groupName: this.config.consumerGroup,
-        consumerName: this.config.consumerId,
-        startId: '$',
-        resetToStartIdOnExistingGroup: true
-      },
-      {
-        streamName: RedisStreamsClient.STREAMS.SWAP_EVENTS,
-        groupName: this.config.consumerGroup,
-        consumerName: this.config.consumerId,
-        startId: '$',
-        resetToStartIdOnExistingGroup: true
-      },
-      {
-        streamName: RedisStreamsClient.STREAMS.VOLUME_AGGREGATES,
-        groupName: this.config.consumerGroup,
-        consumerName: this.config.consumerId,
-        startId: '$',
-        resetToStartIdOnExistingGroup: true
-      },
-      // S3.3.5 FIX: Add PRICE_UPDATES consumer for Solana price feed integration
-      {
-        streamName: RedisStreamsClient.STREAMS.PRICE_UPDATES,
-        groupName: this.config.consumerGroup,
-        consumerName: this.config.consumerId,
-        startId: '$',
-        resetToStartIdOnExistingGroup: true
-      },
-      // OP-10 FIX: Consume execution results to populate successfulExecutions/totalProfit
-      // M-11: startId '$' is intentional — execution results arriving during downtime
-      // represent already-completed trades. The coordinator only needs them for live
-      // dashboard metrics (successfulExecutions, totalProfit), not for correctness.
-      // Trade audit trail is preserved by TradeLogger JSONL files in the execution engine.
-      {
-        streamName: RedisStreamsClient.STREAMS.EXECUTION_RESULTS,
-        groupName: this.config.consumerGroup,
-        consumerName: this.config.consumerId,
-        startId: '$',
-        resetToStartIdOnExistingGroup: true
-      },
-      // P0 Fix ES-003: DLQ consumer group — enables monitoring/draining of dead-letter messages.
-      // Uses startId '0' to process ALL messages (DLQ messages should never be skipped).
-      {
-        streamName: RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE,
-        groupName: this.config.consumerGroup,
-        consumerName: this.config.consumerId,
-        startId: '0',
-        resetToStartIdOnExistingGroup: false
-      },
-      // P1 Fix DF-004: Monitor forwarding DLQ — forwarding failures from OpportunityRouter
-      // go to a separate stream (stream:forwarding-dlq) that was never consumed.
-      // Without this, forwarding failures are never auto-recovered or even observed.
-      {
-        streamName: RedisStreamsClient.STREAMS.FORWARDING_DLQ,
-        groupName: this.config.consumerGroup,
-        consumerName: this.config.consumerId,
-        startId: '0',
-        resetToStartIdOnExistingGroup: false
-      },
-      // C-02 FIX: Consume service degradation events — previously orphaned (0 consumer groups).
-      // Producers: graceful-degradation-manager, self-healing-manager. Without a consumer,
-      // degradation/recovery events were written but never read or acted upon.
-      {
-        streamName: RedisStreamsClient.STREAMS.SERVICE_DEGRADATION,
-        groupName: this.config.consumerGroup,
-        consumerName: this.config.consumerId,
-        startId: '$',
-        resetToStartIdOnExistingGroup: true
-      }
+    //
+    // DLQ streams use fromBeginning (startId '0', no group reset) because dead-letter
+    // messages should never be skipped — they need human/automated triage.
+    const streamDefs: Array<{ stream: string; fromBeginning?: boolean }> = [
+      { stream: RedisStreamsClient.STREAMS.HEALTH },
+      { stream: RedisStreamsClient.STREAMS.OPPORTUNITIES },
+      { stream: RedisStreamsClient.STREAMS.WHALE_ALERTS },
+      { stream: RedisStreamsClient.STREAMS.SWAP_EVENTS },
+      { stream: RedisStreamsClient.STREAMS.VOLUME_AGGREGATES },
+      { stream: RedisStreamsClient.STREAMS.PRICE_UPDATES },
+      { stream: RedisStreamsClient.STREAMS.EXECUTION_RESULTS },
+      { stream: RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE, fromBeginning: true },
+      { stream: RedisStreamsClient.STREAMS.FORWARDING_DLQ, fromBeginning: true },
+      { stream: RedisStreamsClient.STREAMS.SERVICE_DEGRADATION },
     ];
+    this.consumerGroups = streamDefs.map(({ stream, fromBeginning }) => ({
+      streamName: stream,
+      groupName: this.config.consumerGroup,
+      consumerName: this.config.consumerId,
+      startId: fromBeginning ? '0' : '$',
+      resetToStartIdOnExistingGroup: !fromBeginning,
+    }));
 
     // REFACTORED: Use extracted middleware and routes from api/ folder
     configureMiddleware(this.app, this.logger);
@@ -659,343 +593,16 @@ export class CoordinatorService implements CoordinatorStateProvider {
         instanceId: this.config.leaderElection.instanceId
       });
 
-      // REFACTOR: Use injected dependencies for testability
-      // Initialize Redis client (for legacy operations)
-      this.redis = await this.deps.getRedisClient() as RedisClient;
+      await this.initializeRedisClients();
+      this.initializeOpportunityRouter();
+      await this.initializeCexFeed();
+      await this.initializeStreamInfrastructure();
+      await this.initializeLeadershipElection();
 
-      // FM-001 FIX: Restore execution circuit breaker state from Redis.
-      // Prevents rapid crash-restart cycles from bypassing circuit protection.
-      try {
-        const stored = await this.redis.get<{ failures: number; isOpen: boolean; lastFailure: number }>('coordinator:cb:execution');
-        if (stored) {
-          this.executionCircuitBreaker.restoreState(stored);
-          this.logger.info('Restored execution circuit breaker state from Redis', {
-            failures: stored.failures,
-            isOpen: stored.isOpen,
-          });
-        }
-      } catch (error) {
-        // M-10 FIX: Log restore failure for debugging (was silent catch)
-        this.logger.debug('Failed to restore CB state from Redis, starting fresh', {
-          error: (error as Error).message,
-        });
-      }
-
-      // Initialize Redis Streams client
-      this.streamsClient = await this.deps.getRedisStreamsClient();
-
-      // ADR-037: Create dedicated Redis Streams connection for the opportunities consumer.
-      // The coordinator runs 8 stream consumers on one event loop. When all consumers
-      // share a single ioredis connection, their XREADGROUP/XACK calls serialize at the
-      // TCP socket level. A dedicated connection for the highest-throughput stream
-      // (opportunities at 181+ opps/s) eliminates this contention.
-      this.opportunityStreamsClient = await this.deps.createDedicatedStreamsClient();
-
-      // R2: Initialize stream consumer manager after streams client is available
-      this.streamConsumerManager = new StreamConsumerManager(
-        this.streamsClient,
-        this.logger,
-        {
-          maxStreamErrors: 10, // Threshold before alerting
-          dlqStream: CoordinatorService.DLQ_STREAM,
-          instanceId: this.config.leaderElection.instanceId,
-          // XCLAIM-FIX: Reduce from default 60s to 30s to match opportunity TTL.
-          // Orphaned opportunity messages older than 30s are stale and unsafe to reprocess.
-          orphanClaimMinIdleMs: 30_000,
-        },
-        (alert) => this.sendAlert({
-          type: alert.type,
-          message: alert.message,
-          severity: alert.severity,
-          data: alert.data,
-          timestamp: alert.timestamp,
-        })
-      );
-
-      // R2: Initialize opportunity router after streams client is available
-      // RT-005 FIX: Apply simulation TTL multiplier from env var to extend opportunity TTLs
-      // in simulation mode, preventing 97.7% expiration due to single-threaded processing lag.
-      const simulationTtlMultiplier = safeParseInt(
-        process.env.SIMULATION_OPPORTUNITY_TTL_MULTIPLIER, 1
-      );
-      // P0 FIX: Configurable minimum profit percentage to reduce execution volume.
-      // Default 0.1% filters clearly unprofitable opportunities at coordinator level.
-      const minProfitPct = process.env.COORDINATOR_MIN_PROFIT_PERCENTAGE;
-      const minProfitPercentage = minProfitPct !== undefined ? parseFloat(minProfitPct) : undefined;
-      // Phase 2 (ADR-038): Enable chain-group routing when COORDINATOR_CHAIN_GROUP_ROUTING=true.
-      // When enabled, each opportunity is routed to its chain-group stream (fast/l2/premium/solana)
-      // instead of the single legacy stream. EE instances must set EXECUTION_CHAIN_GROUP accordingly.
-      const chainGroupRoutingEnabled = process.env.COORDINATOR_CHAIN_GROUP_ROUTING === 'true';
-      this.opportunityRouter = new OpportunityRouter(
-        this.logger,
-        this.executionCircuitBreaker,
-        this.streamsClient,
-        {
-          maxOpportunities: this.MAX_OPPORTUNITIES,
-          opportunityTtlMs: this.OPPORTUNITY_TTL_MS,
-          instanceId: this.config.leaderElection.instanceId,
-          executionRequestsStream: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
-          simulationTtlMultiplier,
-          ...(chainGroupRoutingEnabled ? { chainGroupStreamResolver: getStreamForChain } : {}),
-          ...(minProfitPercentage !== undefined && Number.isFinite(minProfitPercentage)
-            ? { minProfitPercentage }
-            : {}),
-        },
-        (alert) => this.sendAlert({
-          type: alert.type,
-          message: alert.message,
-          severity: alert.severity,
-          data: alert.data,
-          timestamp: alert.timestamp,
-        }),
-        // T2-3 FIX: Persist CB state to Redis on open/close transitions.
-        // Uses fire-and-forget set with 5-min TTL — if coordinator is down
-        // for >5min the CB state expires and starts fresh (acceptable).
-        (status) => {
-          this.redis?.set('coordinator:cb:execution', status, 300)
-            .catch(() => { /* best-effort persist */ });
-        }
-      );
-
-      // ADR-036: Start CEX price feed if feature flag is enabled
-      if (FEATURE_FLAGS.useCexPriceSignals) {
-        const isSimMode = process.env.SIMULATION_MODE === 'true';
-        const cexFeed = getCexPriceFeedService({
-          alertThresholdPct: safeParseFloat(process.env.CEX_PRICE_ALERT_THRESHOLD_PCT, 0.3),
-          maxCexPriceAgeMs: safeParseInt(process.env.CEX_PRICE_MAX_AGE_MS, 10000),
-          skipExternalConnection: isSimMode,
-          simulateCexPrices: isSimMode,
-          maxReconnectAttempts: safeParseInt(process.env.CEX_WS_MAX_RECONNECT_ATTEMPTS, 10),
-        });
-        await cexFeed.start();
-
-        // CEX resilience: alert on degradation and recovery.
-        let wasDegraded = false;
-        cexFeed.on('maxReconnectFailed', () => {
-          wasDegraded = true;
-          this.sendAlert({
-            type: 'CEX_FEED_DEGRADED',
-            message: 'CEX price feed (Binance WS) exhausted all reconnect attempts. ' +
-              'Opportunity scoring running without CEX validation — alignment factor is neutral (1.0). ' +
-              'Adaptive profit threshold active if CEX_DEGRADED_PROFIT_MULTIPLIER is set.',
-            severity: 'high',
-            data: { healthSnapshot: cexFeed.getHealthSnapshot() },
-            timestamp: Date.now(),
-          });
-        });
-
-        cexFeed.on('connected', () => {
-          if (wasDegraded) {
-            wasDegraded = false;
-            this.sendAlert({
-              type: 'CEX_FEED_RECOVERED',
-              message: 'CEX price feed (Binance WS) reconnected after degradation. ' +
-                'Opportunity scoring restored to full CEX-DEX validation.',
-              severity: 'low',
-              data: { healthSnapshot: cexFeed.getHealthSnapshot() },
-              timestamp: Date.now(),
-            });
-          }
-        });
-
-        this.logger.info('CEX price feed started', {
-          mode: isSimMode ? 'simulation (synthetic CEX prices)' : 'live (Binance WS)',
-          connected: cexFeed.isConnected(),
-          healthStatus: cexFeed.getHealthSnapshot().status,
-        });
-      }
-
-      // P0-4 FIX: Seed the coordinator's own serviceHealth entry at startup
-      // before the health monitor starts. This prevents detectStaleServices()
-      // from seeing an absent/ancient coordinator entry during the startup phase.
-      this.serviceHealth.set('coordinator', {
-        name: 'coordinator',
-        status: 'healthy',
-        uptime: process.uptime(),
-        memoryUsage: process.memoryUsage().heapUsed,
-        cpuUsage: 0,
-        lastHeartbeat: Date.now(),
-      });
-
-      // R2: Start health monitor (records start time for grace period)
-      this.healthMonitor?.start();
-
-      // Create consumer groups for all streams
-      await this.createConsumerGroups();
-
-      // Register reconnection handler AFTER the initial createConsumerGroups() call.
-      // ioredis has already emitted 'ready' for the initial connection by this point,
-      // so this callback fires ONLY on subsequent reconnections (e.g., after Redis
-      // restart). On reconnection all consumer groups are wiped — recreating them here
-      // ensures the pipeline resumes without waiting for NOGROUP errors in StreamConsumers.
-      this.streamsClient.onReady(async () => {
-        this.logger.warn('Redis Streams reconnected — recreating consumer groups', {
-          groups: this.consumerGroups.length,
-          instanceId: this.config.leaderElection.instanceId,
-        });
-        await this.createConsumerGroups();
-      });
-
-      // ST-010 FIX: Trim stale DLQ entries from previous sessions at startup.
-      // Without this, the DLQ accumulates entries across restarts (348+ entries observed),
-      // creating noise in monitoring and consuming Redis memory. Trims entries older than
-      // 1 hour — stale expired-opportunity DLQ entries have no recovery value.
-      try {
-        const dlqTrimCutoffMs = Date.now() - 3_600_000; // 1 hour
-        const trimmed = await this.streamsClient.xtrim(
-          CoordinatorService.DLQ_STREAM,
-          { minId: `${dlqTrimCutoffMs}-0` }
-        );
-        if (trimmed > 0) {
-          this.logger.info('Trimmed stale DLQ entries from previous sessions', {
-            trimmed,
-            cutoffAgeMs: 3_600_000,
-          });
-        }
-      } catch (error) {
-        // Non-fatal — DLQ trim failure shouldn't block startup
-        this.logger.warn('Failed to trim stale DLQ entries at startup', {
-          error: (error as Error).message,
-        });
-      }
-
-      // CC-M04 FIX: Validate bridge route symmetry at startup.
-      // One-directional routes cause fallback cost estimation for return legs.
-      const routeWarnings = validateRouteSymmetry();
-      if (routeWarnings.length > 0) {
-        this.logger.warn('Asymmetric bridge routes detected — return-leg cost estimation may use fallbacks', {
-          asymmetricCount: routeWarnings.length,
-          warnings: routeWarnings.slice(0, 10), // Cap log size
-        });
-      }
-
-      // P0-FIX 1.3: Recover pending messages from previous coordinator instance
-      // R2 REFACTOR: Use StreamConsumerManager for pending message recovery
-      await this.streamConsumerManager.recoverPendingMessages(
-        this.consumerGroups.map(g => ({
-          streamName: g.streamName,
-          groupName: g.groupName,
-          consumerName: g.consumerName,
-        }))
-      );
-
-      // Configure StreamHealthMonitor to use our consumer group
-      // This fixes the XPENDING errors when monitoring stream health
-      const streamHealthMonitor = this.deps.getStreamHealthMonitor();
-      this.streamHealthMonitor = streamHealthMonitor;
-      streamHealthMonitor.setConsumerGroup(this.config.consumerGroup);
-
-      // P3 FIX: Add critical pipeline streams to monitoring and wire auto-alerts.
-      // The default monitored set covers price-updates, opportunities, etc. but misses
-      // execution-requests, execution-results, and dead-letter-queue — the critical path.
-      if (streamHealthMonitor.addStream) {
-        streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.EXECUTION_REQUESTS);
-        streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.EXECUTION_RESULTS);
-        streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE);
-      }
-
-      // P3 FIX: Register alert handler to route stream health alerts to coordinator's
-      // sendAlert() system (Discord/Slack via AlertNotifier + cooldown management).
-      // Without this, StreamHealthMonitor's triggerAlert() only logs — no external notification.
-      if (streamHealthMonitor.onAlert) {
-        streamHealthMonitor.onAlert((alert) => {
-          this.sendAlert({
-            type: `stream_health:${alert.type}`,
-            message: `[${alert.stream}] ${alert.message}`,
-            severity: alert.severity === 'critical' ? 'critical' : alert.severity === 'warning' ? 'high' : 'low',
-            data: { stream: alert.stream },
-            timestamp: alert.timestamp,
-          });
-        });
-      }
-
-      // P3 FIX: Start periodic stream health monitoring (30s interval).
-      // Previously, start() was never called — StreamHealthMonitor was configured
-      // but sat idle, meaning stream lag and consumer lag were never checked.
-      if (streamHealthMonitor.start) {
-        streamHealthMonitor.start(30_000).catch((error) => {
-          this.logger.warn('Failed to start stream health monitoring (non-fatal)', {
-            error: (error as Error).message,
-          });
-        });
-      }
-
-      // P1-8 FIX: Initialize and start LeadershipElectionService (replaces inline leadership code)
-      this.leadershipElection = new LeadershipElectionService({
-        config: this.config.leaderElection,
-        redis: this.redis,
-        logger: this.logger,
-        isStandby: this.config.isStandby ?? false,
-        canBecomeLeader: this.config.canBecomeLeader ?? true,
-        onAlert: (alert) => this.sendAlert({
-          type: alert.type,
-          message: alert.message,
-          // P1-8 FIX: Map LeadershipElectionService severity to coordinator AlertSeverity
-          // 'info' → 'low' (coordinator uses 'low' instead of 'info')
-          severity: alert.severity === 'info' ? 'low' : alert.severity,
-          data: alert.data,
-          timestamp: alert.timestamp,
-        }),
-        onLeadershipChange: (isLeader: boolean) => {
-          // P1-8 FIX: Update local isLeader field when leadership status changes
-          this.isLeader = isLeader;
-          this.logger.info('Leadership status changed', { isLeader });
-        },
-      });
-
-      // P1-8 FIX: Start leadership election service (replaces tryAcquireLeadership + startLeaderHeartbeat)
-      await this.leadershipElection.start();
-
-      // REFACTOR: Removed isRunning = true - stateManager.executeStart() handles state
-      // The stateManager transitions to 'running' state after this callback completes
-
-      // Start stream consumers (run even as standby for monitoring)
-      // FIX: Await the async method for proper error handling
       await this.startStreamConsumers();
-
-      // P1-8 FIX: LeadershipElectionService now manages heartbeat internally
-      // Removed: this.startLeaderHeartbeat()
-
-      // Start periodic health monitoring
       this.startHealthMonitoring();
-
-      // REFACTOR: Start opportunity cleanup on separate interval (prevents race conditions)
       this.startOpportunityCleanup();
-
-      // Start HTTP server
-      // In production, bind to localhost if no auth is configured to prevent
-      // exposing admin endpoints (restart, alerts) on public interfaces
-      const isProduction = process.env.NODE_ENV === 'production';
-      const authConfigured = isAuthEnabled();
-      const bindHost = (isProduction && !authConfigured) ? '127.0.0.1' : undefined;
-
-      if (isProduction && !authConfigured) {
-        this.logger.warn(
-          'Production mode with no authentication configured — binding to 127.0.0.1 only. ' +
-          'Set JWT_SECRET or API_KEYS to bind on all interfaces.',
-          { port: serverPort }
-        );
-      }
-
-      const listenCallback = () => {
-        this.logger.info('Coordinator dashboard available', {
-          url: `http://${bindHost ?? 'localhost'}:${serverPort}`,
-          isLeader: this.isLeader,
-          bindHost: bindHost ?? '0.0.0.0',
-          authEnabled: authConfigured,
-        });
-      };
-
-      if (bindHost) {
-        this.server = this.app.listen(serverPort, bindHost, listenCallback);
-      } else {
-        this.server = this.app.listen(serverPort, listenCallback);
-      }
-
-      // P2 FIX: Use proper Error type
-      this.server.on('error', (error: Error) => {
-        this.logger.error('HTTP server error', { error: error.message });
-      });
+      this.startHttpServer(serverPort);
 
       this.logger.info('Coordinator Service started successfully', {
         isLeader: this.isLeader,
@@ -1011,6 +618,320 @@ export class CoordinatorService implements CoordinatorStateProvider {
       });
       throw result.error;
     }
+  }
+
+  // ===========================================================================
+  // Start() Init Phases (CQ-4 extraction)
+  // ===========================================================================
+
+  /**
+   * Initialize Redis clients: standard, streams, dedicated opportunity streams,
+   * and the StreamConsumerManager. Restores circuit breaker state from Redis.
+   */
+  private async initializeRedisClients(): Promise<void> {
+    this.redis = await this.deps.getRedisClient() as RedisClient;
+
+    // FM-001 FIX: Restore execution circuit breaker state from Redis.
+    // Prevents rapid crash-restart cycles from bypassing circuit protection.
+    try {
+      const stored = await this.redis.get<{ failures: number; isOpen: boolean; lastFailure: number }>('coordinator:cb:execution');
+      if (stored) {
+        this.executionCircuitBreaker.restoreState(stored);
+        this.logger.info('Restored execution circuit breaker state from Redis', {
+          failures: stored.failures,
+          isOpen: stored.isOpen,
+        });
+      }
+    } catch (error) {
+      this.logger.debug('Failed to restore CB state from Redis, starting fresh', {
+        error: (error as Error).message,
+      });
+    }
+
+    this.streamsClient = await this.deps.getRedisStreamsClient();
+
+    // ADR-037: Dedicated Redis Streams connection for the opportunities consumer.
+    // Eliminates TCP-level serialization contention across 8 stream consumers.
+    this.opportunityStreamsClient = await this.deps.createDedicatedStreamsClient();
+
+    this.streamConsumerManager = new StreamConsumerManager(
+      this.streamsClient,
+      this.logger,
+      {
+        maxStreamErrors: 10,
+        dlqStream: CoordinatorService.DLQ_STREAM,
+        instanceId: this.config.leaderElection.instanceId,
+        // XCLAIM-FIX: Reduce from default 60s to 30s to match opportunity TTL.
+        orphanClaimMinIdleMs: 30_000,
+      },
+      (alert) => this.sendAlert({
+        type: alert.type,
+        message: alert.message,
+        severity: alert.severity,
+        data: alert.data,
+        timestamp: alert.timestamp,
+      })
+    );
+  }
+
+  /**
+   * Initialize the OpportunityRouter with simulation TTL, min profit filtering,
+   * and chain-group routing configuration.
+   */
+  private initializeOpportunityRouter(): void {
+    // RT-005 FIX: Apply simulation TTL multiplier from env var to extend opportunity TTLs
+    // in simulation mode, preventing 97.7% expiration due to single-threaded processing lag.
+    const simulationTtlMultiplier = safeParseInt(
+      process.env.SIMULATION_OPPORTUNITY_TTL_MULTIPLIER, 1
+    );
+    // P0 FIX: Configurable minimum profit percentage to reduce execution volume.
+    const minProfitPct = process.env.COORDINATOR_MIN_PROFIT_PERCENTAGE;
+    const minProfitPercentage = minProfitPct !== undefined ? parseFloat(minProfitPct) : undefined;
+    // Phase 2 (ADR-038): Enable chain-group routing when COORDINATOR_CHAIN_GROUP_ROUTING=true.
+    const chainGroupRoutingEnabled = process.env.COORDINATOR_CHAIN_GROUP_ROUTING === 'true';
+    this.opportunityRouter = new OpportunityRouter(
+      this.logger,
+      this.executionCircuitBreaker,
+      this.streamsClient,
+      {
+        maxOpportunities: this.MAX_OPPORTUNITIES,
+        opportunityTtlMs: this.OPPORTUNITY_TTL_MS,
+        instanceId: this.config.leaderElection.instanceId,
+        executionRequestsStream: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
+        simulationTtlMultiplier,
+        ...(chainGroupRoutingEnabled ? { chainGroupStreamResolver: getStreamForChain } : {}),
+        ...(minProfitPercentage !== undefined && Number.isFinite(minProfitPercentage)
+          ? { minProfitPercentage }
+          : {}),
+      },
+      (alert) => this.sendAlert({
+        type: alert.type,
+        message: alert.message,
+        severity: alert.severity,
+        data: alert.data,
+        timestamp: alert.timestamp,
+      }),
+      // T2-3 FIX: Persist CB state to Redis on open/close transitions.
+      (status) => {
+        this.redis?.set('coordinator:cb:execution', status, 300)
+          .catch(() => { /* best-effort persist */ });
+      }
+    );
+  }
+
+  /**
+   * Start CEX price feed if the feature flag is enabled (ADR-036).
+   * Wires degradation/recovery alerts for Binance WS connection.
+   */
+  private async initializeCexFeed(): Promise<void> {
+    if (!FEATURE_FLAGS.useCexPriceSignals) return;
+
+    const isSimMode = process.env.SIMULATION_MODE === 'true';
+    const cexFeed = getCexPriceFeedService({
+      alertThresholdPct: safeParseFloat(process.env.CEX_PRICE_ALERT_THRESHOLD_PCT, 0.3),
+      maxCexPriceAgeMs: safeParseInt(process.env.CEX_PRICE_MAX_AGE_MS, 10000),
+      skipExternalConnection: isSimMode,
+      simulateCexPrices: isSimMode,
+      maxReconnectAttempts: safeParseInt(process.env.CEX_WS_MAX_RECONNECT_ATTEMPTS, 10),
+    });
+    await cexFeed.start();
+
+    // CEX resilience: alert on degradation and recovery.
+    let wasDegraded = false;
+    cexFeed.on('maxReconnectFailed', () => {
+      wasDegraded = true;
+      this.sendAlert({
+        type: 'CEX_FEED_DEGRADED',
+        message: 'CEX price feed (Binance WS) exhausted all reconnect attempts. ' +
+          'Opportunity scoring running without CEX validation — alignment factor is neutral (1.0). ' +
+          'Adaptive profit threshold active if CEX_DEGRADED_PROFIT_MULTIPLIER is set.',
+        severity: 'high',
+        data: { healthSnapshot: cexFeed.getHealthSnapshot() },
+        timestamp: Date.now(),
+      });
+    });
+
+    cexFeed.on('connected', () => {
+      if (wasDegraded) {
+        wasDegraded = false;
+        this.sendAlert({
+          type: 'CEX_FEED_RECOVERED',
+          message: 'CEX price feed (Binance WS) reconnected after degradation. ' +
+            'Opportunity scoring restored to full CEX-DEX validation.',
+          severity: 'low',
+          data: { healthSnapshot: cexFeed.getHealthSnapshot() },
+          timestamp: Date.now(),
+        });
+      }
+    });
+
+    this.logger.info('CEX price feed started', {
+      mode: isSimMode ? 'simulation (synthetic CEX prices)' : 'live (Binance WS)',
+      connected: cexFeed.isConnected(),
+      healthStatus: cexFeed.getHealthSnapshot().status,
+    });
+  }
+
+  /**
+   * Set up stream infrastructure: seed health, create consumer groups, register
+   * reconnection handler, trim stale DLQ, validate bridge routes, recover pending
+   * messages, and configure the StreamHealthMonitor.
+   */
+  private async initializeStreamInfrastructure(): Promise<void> {
+    // P0-4 FIX: Seed the coordinator's own serviceHealth entry at startup
+    this.serviceHealth.set('coordinator', {
+      name: 'coordinator',
+      status: 'healthy',
+      uptime: process.uptime(),
+      memoryUsage: process.memoryUsage().heapUsed,
+      cpuUsage: 0,
+      lastHeartbeat: Date.now(),
+    });
+
+    this.healthMonitor?.start();
+
+    await this.createConsumerGroups();
+
+    // Register reconnection handler AFTER the initial createConsumerGroups() call.
+    // ioredis has already emitted 'ready' for the initial connection by this point,
+    // so this callback fires ONLY on subsequent reconnections (e.g., after Redis restart).
+    this.streamsClient!.onReady(async () => {
+      this.logger.warn('Redis Streams reconnected — recreating consumer groups', {
+        groups: this.consumerGroups.length,
+        instanceId: this.config.leaderElection.instanceId,
+      });
+      await this.createConsumerGroups();
+    });
+
+    // ST-010 FIX: Trim stale DLQ entries from previous sessions at startup.
+    try {
+      const dlqTrimCutoffMs = Date.now() - 3_600_000; // 1 hour
+      const trimmed = await this.streamsClient!.xtrim(
+        CoordinatorService.DLQ_STREAM,
+        { minId: `${dlqTrimCutoffMs}-0` }
+      );
+      if (trimmed > 0) {
+        this.logger.info('Trimmed stale DLQ entries from previous sessions', {
+          trimmed,
+          cutoffAgeMs: 3_600_000,
+        });
+      }
+    } catch (error) {
+      this.logger.warn('Failed to trim stale DLQ entries at startup', {
+        error: (error as Error).message,
+      });
+    }
+
+    // CC-M04 FIX: Validate bridge route symmetry at startup.
+    const routeWarnings = validateRouteSymmetry();
+    if (routeWarnings.length > 0) {
+      this.logger.warn('Asymmetric bridge routes detected — return-leg cost estimation may use fallbacks', {
+        asymmetricCount: routeWarnings.length,
+        warnings: routeWarnings.slice(0, 10),
+      });
+    }
+
+    // Recover pending messages from previous coordinator instance
+    await this.streamConsumerManager!.recoverPendingMessages(
+      this.consumerGroups.map(g => ({
+        streamName: g.streamName,
+        groupName: g.groupName,
+        consumerName: g.consumerName,
+      }))
+    );
+
+    // Configure StreamHealthMonitor
+    const streamHealthMonitor = this.deps.getStreamHealthMonitor();
+    this.streamHealthMonitor = streamHealthMonitor;
+    streamHealthMonitor.setConsumerGroup(this.config.consumerGroup);
+
+    if (streamHealthMonitor.addStream) {
+      streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.EXECUTION_REQUESTS);
+      streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.EXECUTION_RESULTS);
+      streamHealthMonitor.addStream(RedisStreamsClient.STREAMS.DEAD_LETTER_QUEUE);
+    }
+
+    if (streamHealthMonitor.onAlert) {
+      streamHealthMonitor.onAlert((alert) => {
+        this.sendAlert({
+          type: `stream_health:${alert.type}`,
+          message: `[${alert.stream}] ${alert.message}`,
+          severity: alert.severity === 'critical' ? 'critical' : alert.severity === 'warning' ? 'high' : 'low',
+          data: { stream: alert.stream },
+          timestamp: alert.timestamp,
+        });
+      });
+    }
+
+    if (streamHealthMonitor.start) {
+      streamHealthMonitor.start(30_000).catch((error) => {
+        this.logger.warn('Failed to start stream health monitoring (non-fatal)', {
+          error: (error as Error).message,
+        });
+      });
+    }
+  }
+
+  /**
+   * Initialize and start the LeadershipElectionService (ADR-007).
+   */
+  private async initializeLeadershipElection(): Promise<void> {
+    this.leadershipElection = new LeadershipElectionService({
+      config: this.config.leaderElection,
+      redis: this.redis!,
+      logger: this.logger,
+      isStandby: this.config.isStandby ?? false,
+      canBecomeLeader: this.config.canBecomeLeader ?? true,
+      onAlert: (alert) => this.sendAlert({
+        type: alert.type,
+        message: alert.message,
+        severity: alert.severity === 'info' ? 'low' : alert.severity,
+        data: alert.data,
+        timestamp: alert.timestamp,
+      }),
+      onLeadershipChange: (isLeader: boolean) => {
+        this.isLeader = isLeader;
+        this.logger.info('Leadership status changed', { isLeader });
+      },
+    });
+
+    await this.leadershipElection.start();
+  }
+
+  /**
+   * Start the HTTP server, binding to localhost in production when auth is not configured.
+   */
+  private startHttpServer(serverPort: number): void {
+    const isProduction = process.env.NODE_ENV === 'production';
+    const authConfigured = isAuthEnabled();
+    const bindHost = (isProduction && !authConfigured) ? '127.0.0.1' : undefined;
+
+    if (isProduction && !authConfigured) {
+      this.logger.warn(
+        'Production mode with no authentication configured — binding to 127.0.0.1 only. ' +
+        'Set JWT_SECRET or API_KEYS to bind on all interfaces.',
+        { port: serverPort }
+      );
+    }
+
+    const listenCallback = () => {
+      this.logger.info('Coordinator dashboard available', {
+        url: `http://${bindHost ?? 'localhost'}:${serverPort}`,
+        isLeader: this.isLeader,
+        bindHost: bindHost ?? '0.0.0.0',
+        authEnabled: authConfigured,
+      });
+    };
+
+    if (bindHost) {
+      this.server = this.app.listen(serverPort, bindHost, listenCallback);
+    } else {
+      this.server = this.app.listen(serverPort, listenCallback);
+    }
+
+    this.server.on('error', (error: Error) => {
+      this.logger.error('HTTP server error', { error: error.message });
+    });
   }
 
   /**
@@ -1978,6 +1899,53 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   /**
+   * Process a single execution result: update metrics, opportunity status, and emit SSE.
+   * Shared by handleExecutionResultBatch and handleExecutionResultMessage.
+   * @returns actualProfit value for batch aggregation
+   */
+  private processOneExecutionResult(
+    rawResult: Record<string, unknown>,
+    success: boolean,
+    opportunityId: string,
+    chain: string,
+  ): number {
+    const actualProfit = getNumber(rawResult, 'actualProfit', 0);
+    const gasCost = getNumber(rawResult, 'gasCost', 0);
+
+    if (success) {
+      this.systemMetrics.successfulExecutions++;
+      if (actualProfit > 0) {
+        this.systemMetrics.totalProfit += actualProfit;
+      }
+    }
+
+    this.opportunityRouter?.updateOpportunityStatus(
+      opportunityId,
+      success ? 'completed' : 'failed',
+      { actualProfit, gasCost, netProfit: actualProfit - gasCost },
+    );
+
+    this.emitSSE('execution-result', {
+      opportunityId,
+      success,
+      chain,
+      dex: getString(rawResult, 'dex', 'unknown'),
+      actualProfit,
+      gasUsed: getNumber(rawResult, 'gasUsed', 0),
+      gasCost,
+      error: getOptionalString(rawResult, 'error'),
+      transactionHash: getOptionalString(rawResult, 'transactionHash'),
+      latencyMs: getNumber(rawResult, 'latencyMs', 0),
+      timestamp: getNumber(rawResult, 'timestamp', Date.now()),
+    });
+
+    // P2-5: Do not reset stream errors from execution results.
+    // Only the opportunity handler (primary data path) should reset errors.
+
+    return actualProfit;
+  }
+
+  /**
    * RT-3J-001 FIX: Batch handler for the execution-results stream.
    *
    * Replaces per-message handleExecutionResultMessage to eliminate consumer lag.
@@ -2023,45 +1991,15 @@ export class CoordinatorService implements CoordinatorStateProvider {
         continue;
       }
 
+      const actualProfit = this.processOneExecutionResult(rawResult, success, opportunityId, chain);
       if (success) {
-        this.systemMetrics.successfulExecutions++;
         batchSuccesses++;
-        const actualProfit = getNumber(rawResult, 'actualProfit', 0);
         if (actualProfit > 0) {
-          this.systemMetrics.totalProfit += actualProfit;
           batchProfit += actualProfit;
         }
       } else {
         batchFailures++;
       }
-
-      // Update opportunity status so dashboard shows completed/failed results
-      const gasCost = getNumber(rawResult, 'gasCost', 0);
-      const actualProfitForUpdate = getNumber(rawResult, 'actualProfit', 0);
-      this.opportunityRouter?.updateOpportunityStatus(
-        opportunityId,
-        success ? 'completed' : 'failed',
-        {
-          actualProfit: actualProfitForUpdate,
-          gasCost,
-          netProfit: actualProfitForUpdate - gasCost,
-        },
-      );
-
-      // Preserve per-result SSE for dashboard feed
-      this.emitSSE('execution-result', {
-        opportunityId,
-        success,
-        chain,
-        dex: getString(rawResult, 'dex', 'unknown'),
-        actualProfit: getNumber(rawResult, 'actualProfit', 0),
-        gasUsed: getNumber(rawResult, 'gasUsed', 0),
-        gasCost: getNumber(rawResult, 'gasCost', 0),
-        error: getOptionalString(rawResult, 'error'),
-        transactionHash: getOptionalString(rawResult, 'transactionHash'),
-        latencyMs: getNumber(rawResult, 'latencyMs', 0),
-        timestamp: getNumber(rawResult, 'timestamp', Date.now()),
-      });
 
       processedIds.push(msg.id);
     }
@@ -2117,12 +2055,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
       return;
     }
 
+    const actualProfit = this.processOneExecutionResult(rawResult, success, opportunityId, chain);
+
     if (success) {
-      this.systemMetrics.successfulExecutions++;
-      const actualProfit = getNumber(rawResult, 'actualProfit', 0);
-      if (actualProfit > 0) {
-        this.systemMetrics.totalProfit += actualProfit;
-      }
       this.logger.info('Execution result: success', {
         opportunityId,
         chain,
@@ -2130,44 +2065,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
         totalSuccessful: this.systemMetrics.successfulExecutions,
       });
     } else {
-      const error = getOptionalString(rawResult, 'error');
       this.logger.debug('Execution result: failure', {
         opportunityId,
         chain,
-        error,
+        error: getOptionalString(rawResult, 'error'),
       });
     }
-
-    // Update opportunity status so dashboard shows completed/failed results
-    const gasCost = getNumber(rawResult, 'gasCost', 0);
-    const actualProfitForUpdate = getNumber(rawResult, 'actualProfit', 0);
-    this.opportunityRouter?.updateOpportunityStatus(
-      opportunityId,
-      success ? 'completed' : 'failed',
-      {
-        actualProfit: actualProfitForUpdate,
-        gasCost,
-        netProfit: actualProfitForUpdate - gasCost,
-      },
-    );
-
-    // Push execution result to SSE dashboard clients
-    this.emitSSE('execution-result', {
-      opportunityId,
-      success,
-      chain,
-      dex: getString(rawResult, 'dex', 'unknown'),
-      actualProfit: getNumber(rawResult, 'actualProfit', 0),
-      gasUsed: getNumber(rawResult, 'gasUsed', 0),
-      gasCost: getNumber(rawResult, 'gasCost', 0),
-      error: getOptionalString(rawResult, 'error'),
-      transactionHash: getOptionalString(rawResult, 'transactionHash'),
-      latencyMs: getNumber(rawResult, 'latencyMs', 0),
-      timestamp: getNumber(rawResult, 'timestamp', Date.now()),
-    });
-
-    // P2-5: Do not reset stream errors from execution results.
-    // Only the opportunity handler (primary data path) should reset errors.
 
     }); // end withLogContext
   }
