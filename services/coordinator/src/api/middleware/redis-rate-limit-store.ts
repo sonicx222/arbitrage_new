@@ -68,6 +68,17 @@ export class RedisRateLimitStore implements RateLimitStore {
   /** P2-1 FIX: Structured logger for OTEL transport and log-level filtering. */
   private log: RateLimitStoreLogger;
 
+  /**
+   * P2-3 FIX: Simple circuit breaker to avoid 3s connection timeout on every
+   * HTTP request when Redis is permanently unreachable. After consecutiveFailures
+   * exceeds threshold, short-circuit to fail-closed without attempting Redis.
+   * Resets after a cooldown period to allow recovery detection.
+   */
+  private consecutiveFailures = 0;
+  private readonly cbFailureThreshold = 5;
+  private cbOpenUntil = 0;
+  private readonly cbCooldownMs = 10_000;
+
   /** False = keys are shared across instances (the whole point). */
   localKeys = false;
 
@@ -75,6 +86,34 @@ export class RedisRateLimitStore implements RateLimitStore {
     this.prefix = prefix;
     this.redisUrl = redisUrl;
     this.log = logger ?? { warn: (msg, data) => console.warn(`[RedisRateLimitStore] ${msg}`, data ?? '') };
+  }
+
+  /** Record a successful Redis operation — resets the circuit breaker. */
+  private recordSuccess(): void {
+    this.consecutiveFailures = 0;
+  }
+
+  /** Record a failed Redis operation — opens the circuit breaker after threshold. */
+  private recordFailure(): void {
+    this.consecutiveFailures++;
+    if (this.consecutiveFailures >= this.cbFailureThreshold) {
+      this.cbOpenUntil = Date.now() + this.cbCooldownMs;
+      this.log.warn('Circuit breaker OPEN — short-circuiting to fail-closed', {
+        failures: this.consecutiveFailures,
+        cooldownMs: this.cbCooldownMs,
+      });
+    }
+  }
+
+  /** Returns true if the circuit breaker is open (should skip Redis). */
+  private isCircuitOpen(): boolean {
+    if (this.consecutiveFailures < this.cbFailureThreshold) return false;
+    if (Date.now() >= this.cbOpenUntil) {
+      // Cooldown expired — allow one probe attempt (half-open)
+      this.consecutiveFailures = this.cbFailureThreshold - 1;
+      return false;
+    }
+    return true;
   }
 
   init(options: { windowMs: number }): void {
@@ -103,16 +142,19 @@ export class RedisRateLimitStore implements RateLimitStore {
   }
 
   async get(key: string): Promise<{ totalHits: number; resetTime: Date | undefined } | undefined> {
+    if (this.isCircuitOpen()) return undefined;
     try {
       const redis = this.getRedis();
       const [hits, ttl] = await Promise.all([
         redis.get(this.prefix + key),
         redis.pttl(this.prefix + key),
       ]);
+      this.recordSuccess();
       if (hits === null) return undefined;
       const resetTime = ttl > 0 ? new Date(Date.now() + ttl) : undefined;
       return { totalHits: parseInt(hits, 10), resetTime };
     } catch (err) {
+      this.recordFailure();
       // P1-7 FIX: Log per-operation failures for operational visibility.
       this.log.warn('get failed', { error: (err as Error).message });
       return undefined;
@@ -120,6 +162,10 @@ export class RedisRateLimitStore implements RateLimitStore {
   }
 
   async increment(key: string): Promise<{ totalHits: number; resetTime: Date | undefined }> {
+    // P2-3 FIX: Skip Redis when circuit is open — fail closed immediately.
+    if (this.isCircuitOpen()) {
+      return { totalHits: Infinity, resetTime: new Date(Date.now() + this.windowMs) };
+    }
     const prefixedKey = this.prefix + key;
     try {
       const redis = this.getRedis();
@@ -129,33 +175,42 @@ export class RedisRateLimitStore implements RateLimitStore {
         ATOMIC_INCR_LUA, 1, prefixedKey, this.windowMs.toString()
       ) as number;
       const ttl = await redis.pttl(prefixedKey);
+      this.recordSuccess();
       const resetTime = ttl > 0 ? new Date(Date.now() + ttl) : new Date(Date.now() + this.windowMs);
       return { totalHits, resetTime };
     } catch {
+      this.recordFailure();
       // Fail CLOSED: treat Redis failure as "limit exceeded"
       return { totalHits: Infinity, resetTime: new Date(Date.now() + this.windowMs) };
     }
   }
 
   async decrement(key: string): Promise<void> {
+    if (this.isCircuitOpen()) return;
     try {
       await this.getRedis().decr(this.prefix + key);
+      this.recordSuccess();
     } catch (err) {
+      this.recordFailure();
       // P1-7 FIX: Log for operational visibility (best-effort operation).
       this.log.warn('decrement failed', { error: (err as Error).message });
     }
   }
 
   async resetKey(key: string): Promise<void> {
+    if (this.isCircuitOpen()) return;
     try {
       await this.getRedis().del(this.prefix + key);
+      this.recordSuccess();
     } catch (err) {
+      this.recordFailure();
       // P1-7 FIX: Log for operational visibility (best-effort operation).
       this.log.warn('resetKey failed', { error: (err as Error).message });
     }
   }
 
   async resetAll(): Promise<void> {
+    if (this.isCircuitOpen()) return;
     try {
       const redis = this.getRedis();
       // Use SCAN to find and delete all rate limit keys (never use KEYS)
@@ -167,7 +222,9 @@ export class RedisRateLimitStore implements RateLimitStore {
           await redis.del(...keys);
         }
       } while (cursor !== '0');
+      this.recordSuccess();
     } catch (err) {
+      this.recordFailure();
       // P1-7 FIX: Log for operational visibility (best-effort operation).
       this.log.warn('resetAll failed', { error: (err as Error).message });
     }

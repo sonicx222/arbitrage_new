@@ -142,17 +142,19 @@ export const chainEstimatedGasCostUsd: Record<string, number> = {
   polygon: 0.05,     // ~$0.01-$0.10
   avalanche: 0.10,   // ~$0.05-$0.20
   fantom: 0.02,      // ~$0.01-$0.05
-  // L2 chains — cheap
-  arbitrum: 0.10,    // ~$0.05-$0.20
-  optimism: 0.05,    // ~$0.02-$0.10
-  base: 0.05,        // ~$0.02-$0.10
-  zksync: 0.10,      // ~$0.05-$0.20
-  linea: 0.10,       // ~$0.05-$0.20
-  // Emerging L2s — cheap
-  blast: 0.05,       // OP-stack L2
-  scroll: 0.10,      // zkRollup L2
-  mantle: 0.03,      // Modular L2 (EigenDA)
-  mode: 0.05,        // OP-stack L2
+  // L2 rollup chains — includes L1 data posting fees (50-90% of actual L2 tx cost).
+  // P2-8 FIX: Previous values were execution-only estimates that excluded L1 data fees,
+  // causing ~3x underestimate of true transaction cost on rollup chains.
+  arbitrum: 0.30,    // ~$0.10-$0.50 (execution ~$0.10 + L1 data ~$0.20)
+  optimism: 0.15,    // ~$0.05-$0.25 (execution ~$0.05 + L1 data ~$0.10)
+  base: 0.15,        // ~$0.05-$0.25 (execution ~$0.05 + L1 data ~$0.10)
+  zksync: 0.25,      // ~$0.10-$0.40 (execution ~$0.10 + L1 proof/data ~$0.15)
+  linea: 0.25,       // ~$0.10-$0.40 (execution ~$0.10 + L1 proof/data ~$0.15)
+  // Emerging L2s — includes L1 data posting fees
+  blast: 0.15,       // OP-stack L2 (execution ~$0.05 + L1 data ~$0.10)
+  scroll: 0.25,      // zkRollup L2 (execution ~$0.10 + L1 proof/data ~$0.15)
+  mantle: 0.05,      // Modular L2 (EigenDA — lower L1 data costs than calldata rollups)
+  mode: 0.15,        // OP-stack L2 (execution ~$0.05 + L1 data ~$0.10)
   // Non-EVM
   solana: 0.005,     // ~$0.001-$0.01 (priority fees)
 };

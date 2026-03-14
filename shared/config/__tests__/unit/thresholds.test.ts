@@ -234,7 +234,7 @@ describe('Thresholds Configuration', () => {
 
         it('should return correct cost for Arbitrum (cheap L2)', () => {
             const cost = getEstimatedGasCostUsd('arbitrum');
-            expect(cost).toBe(0.10); // ~$0.10 L2 gas
+            expect(cost).toBe(0.30); // ~$0.30 L2 gas (includes L1 data posting fees)
             expect(cost).toBeGreaterThan(0);
             expect(cost).toBeLessThan(15.0); // Much cheaper than mainnet
         });
@@ -254,13 +254,13 @@ describe('Thresholds Configuration', () => {
 
         it('should return correct cost for Blast (emerging L2)', () => {
             const cost = getEstimatedGasCostUsd('blast');
-            expect(cost).toBe(0.05);
+            expect(cost).toBe(0.15); // includes L1 data posting fees
             expect(cost).toBeGreaterThan(0);
         });
 
         it('should return correct cost for Scroll (emerging L2)', () => {
             const cost = getEstimatedGasCostUsd('scroll');
-            expect(cost).toBe(0.10);
+            expect(cost).toBe(0.25); // includes L1 proof/data posting fees
             expect(cost).toBeGreaterThan(0);
         });
 
