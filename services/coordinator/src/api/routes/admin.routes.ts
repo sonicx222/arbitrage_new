@@ -57,6 +57,10 @@ const ALLOWED_SERVICES = [
   'fantom-detector',
   'zksync-detector',
   'linea-detector',
+  'blast-detector',
+  'scroll-detector',
+  'mantle-detector',
+  'mode-detector',
   'solana-detector'
 ];
 

@@ -1685,10 +1685,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // Provides TTL-based cleanup and emergency eviction with hysteresis
   private activePairsTracker: ActivePairsTracker | null = null;
 
-  /**
-   * @deprecated Access via activePairsTracker instead. Kept for backward compat in tests.
-   * Returns the internal Map from activePairsTracker for test access via (coordinator as any).activePairs
-   */
+  /** Test accessor — returns activePairsTracker (has public size, has(), get(), set()). */
   private get activePairs(): ActivePairsTracker | null {
     return this.activePairsTracker;
   }

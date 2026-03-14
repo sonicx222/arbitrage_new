@@ -41,9 +41,13 @@ export function createHealthRoutes(state: CoordinatorStateProvider): Router {
       // FIX #24: Use 'healthy'/'degraded' to match other services.
       const status = systemHealth >= 50 ? 'healthy' : 'degraded';
       const serviceHealth = state.getServiceHealthMap();
+      let healthyCount = 0;
+      for (const s of serviceHealth.values()) {
+        if (s.status === 'healthy') healthyCount++;
+      }
       const servicesSummary = {
         total: serviceHealth.size,
-        healthy: [...serviceHealth.values()].filter(s => s.status === 'healthy').length,
+        healthy: healthyCount,
       };
 
       // Minimal response for unauthenticated requests (load balancer probes)
