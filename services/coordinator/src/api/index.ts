@@ -10,7 +10,7 @@
 export * from './types';
 
 // Middleware
-export { configureMiddleware } from './middleware';
+export { configureMiddleware, shutdownRateLimitStore } from './middleware';
 
 // Routes
 export {

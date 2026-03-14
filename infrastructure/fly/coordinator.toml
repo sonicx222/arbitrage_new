@@ -33,6 +33,12 @@ primary_region = "sjc"
   ENABLE_CROSS_REGION_HEALTH = "true"
   IS_STANDBY = "false"
   CAN_BECOME_LEADER = "true"
+  # P0-1 FIX: Trust Fly.io reverse proxy so express-rate-limit uses X-Forwarded-For.
+  # Without this, all clients share one rate-limit bucket (proxy IP = socket IP).
+  TRUST_PROXY = "1"
+  # P1-6 FIX: Use Redis-backed rate limiting for multi-instance deployment.
+  # Without this, each instance has its own in-memory store (N instances = N * limit).
+  RATE_LIMIT_STORE = "redis"
   # SM-002/ADR-038: Enable chain-group routing to distribute execution across
   # multiple EE instances. Each EE sets EXECUTION_CHAIN_GROUP={fast|l2|premium|solana}.
   # Without this, single EE throughput bottleneck causes growing consumer lag.

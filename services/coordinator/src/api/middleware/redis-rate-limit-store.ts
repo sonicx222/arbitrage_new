@@ -33,7 +33,27 @@ interface RateLimitStore {
 }
 
 /**
- * Redis-backed rate limit store using INCR + PEXPIRE.
+ * Lua script for atomic INCR + PEXPIRE.
+ * DATA-H-01 FIX: If process crashes between separate INCR and PEXPIRE commands,
+ * the key has no TTL and becomes an immortal counter — permanently blocking
+ * legitimate clients. This Lua script executes both atomically in Redis.
+ */
+const ATOMIC_INCR_LUA = `
+local c = redis.call('INCR', KEYS[1])
+if c == 1 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+return c
+`;
+
+/** Minimal logger interface for RedisRateLimitStore (avoids importing full Pino). */
+export interface RateLimitStoreLogger {
+  warn(message: string, data?: Record<string, unknown>): void;
+  debug?(message: string, data?: Record<string, unknown>): void;
+}
+
+/**
+ * Redis-backed rate limit store using atomic INCR + PEXPIRE.
  *
  * Each key stores a hit counter with TTL matching the rate limit window.
  * All instances share the same Redis keys, so rate limits are global.
@@ -45,13 +65,16 @@ export class RedisRateLimitStore implements RateLimitStore {
   /** Public per express-rate-limit Store interface (used for double-count detection). */
   prefix: string;
   private connected = false;
+  /** P2-1 FIX: Structured logger for OTEL transport and log-level filtering. */
+  private log: RateLimitStoreLogger;
 
   /** False = keys are shared across instances (the whole point). */
   localKeys = false;
 
-  constructor(redisUrl: string, prefix = 'rl:') {
+  constructor(redisUrl: string, prefix = 'rl:', logger?: RateLimitStoreLogger) {
     this.prefix = prefix;
     this.redisUrl = redisUrl;
+    this.log = logger ?? { warn: (msg, data) => console.warn(`[RedisRateLimitStore] ${msg}`, data ?? '') };
   }
 
   init(options: { windowMs: number }): void {
@@ -72,7 +95,7 @@ export class RedisRateLimitStore implements RateLimitStore {
       // connectivity issues are visible in logs for operational monitoring.
       // Logs once per disconnect cycle (not per retry) to avoid log spam.
       this.redis.on('error', (err) => {
-        console.warn('[RedisRateLimitStore] Redis connection error:', err.message);
+        this.log.warn('Redis connection error', { error: err.message });
       });
       this.redis.on('ready', () => { this.connected = true; });
     }
@@ -89,7 +112,9 @@ export class RedisRateLimitStore implements RateLimitStore {
       if (hits === null) return undefined;
       const resetTime = ttl > 0 ? new Date(Date.now() + ttl) : undefined;
       return { totalHits: parseInt(hits, 10), resetTime };
-    } catch {
+    } catch (err) {
+      // P1-7 FIX: Log per-operation failures for operational visibility.
+      this.log.warn('get failed', { error: (err as Error).message });
       return undefined;
     }
   }
@@ -98,11 +123,11 @@ export class RedisRateLimitStore implements RateLimitStore {
     const prefixedKey = this.prefix + key;
     try {
       const redis = this.getRedis();
-      const totalHits = await redis.incr(prefixedKey);
-      // Set expiry only on first hit (when counter transitions from 0 to 1)
-      if (totalHits === 1) {
-        await redis.pexpire(prefixedKey, this.windowMs);
-      }
+      // DATA-H-01 FIX: Atomic INCR + PEXPIRE via Lua script.
+      // Prevents immortal keys if process crashes between separate commands.
+      const totalHits = await redis.eval(
+        ATOMIC_INCR_LUA, 1, prefixedKey, this.windowMs.toString()
+      ) as number;
       const ttl = await redis.pttl(prefixedKey);
       const resetTime = ttl > 0 ? new Date(Date.now() + ttl) : new Date(Date.now() + this.windowMs);
       return { totalHits, resetTime };
@@ -115,16 +140,18 @@ export class RedisRateLimitStore implements RateLimitStore {
   async decrement(key: string): Promise<void> {
     try {
       await this.getRedis().decr(this.prefix + key);
-    } catch {
-      // Best-effort decrement
+    } catch (err) {
+      // P1-7 FIX: Log for operational visibility (best-effort operation).
+      this.log.warn('decrement failed', { error: (err as Error).message });
     }
   }
 
   async resetKey(key: string): Promise<void> {
     try {
       await this.getRedis().del(this.prefix + key);
-    } catch {
-      // Best-effort reset
+    } catch (err) {
+      // P1-7 FIX: Log for operational visibility (best-effort operation).
+      this.log.warn('resetKey failed', { error: (err as Error).message });
     }
   }
 
@@ -140,8 +167,9 @@ export class RedisRateLimitStore implements RateLimitStore {
           await redis.del(...keys);
         }
       } while (cursor !== '0');
-    } catch {
-      // Best-effort reset
+    } catch (err) {
+      // P1-7 FIX: Log for operational visibility (best-effort operation).
+      this.log.warn('resetAll failed', { error: (err as Error).message });
     }
   }
 
@@ -149,7 +177,8 @@ export class RedisRateLimitStore implements RateLimitStore {
     if (!this.redis) return;
     try {
       await this.redis.quit();
-    } catch {
+    } catch (err) {
+      this.log.warn('quit failed, forcing disconnect', { error: (err as Error).message });
       this.redis.disconnect();
     }
   }

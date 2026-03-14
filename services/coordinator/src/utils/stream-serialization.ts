@@ -52,12 +52,13 @@ export function serializeOpportunityForStream(
   // P3-004 FIX: Lightweight publish-side validation — catch malformed opportunities
   // before they enter EXECUTION_REQUESTS and get rejected into DLQ by consumer validation.
   // Does not throw — logs once per missing-field pattern to avoid hot-path impact.
-  const missing: string[] = [];
-  if (!opportunity.id) missing.push('id');
-  if (!opportunity.chain) missing.push('chain');
-  if (!opportunity.buyDex) missing.push('buyDex');
-  if (!opportunity.sellDex) missing.push('sellDex');
-  if (missing.length > 0) {
+  // P2-11 FIX: Only allocate missing[] array when a field is actually missing (happy path = zero allocs).
+  if (!opportunity.id || !opportunity.chain || !opportunity.buyDex || !opportunity.sellDex) {
+    const missing: string[] = [];
+    if (!opportunity.id) missing.push('id');
+    if (!opportunity.chain) missing.push('chain');
+    if (!opportunity.buyDex) missing.push('buyDex');
+    if (!opportunity.sellDex) missing.push('sellDex');
     const key = missing.join(',');
     if (!_warnedMissingFields.has(key)) {
       _warnedMissingFields.add(key);

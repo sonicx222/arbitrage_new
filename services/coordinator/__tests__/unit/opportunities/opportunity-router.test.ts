@@ -1413,4 +1413,72 @@ describe('OpportunityRouter', () => {
       );
     });
   });
+
+  // ===========================================================================
+  // TQ-H-02: updateOpportunityStatus
+  // ===========================================================================
+
+  describe('updateOpportunityStatus', () => {
+    it('should no-op for unknown opportunity ID', async () => {
+      router.updateOpportunityStatus('nonexistent-id', 'completed');
+      // No throw, no state change
+      expect(router.getPendingCount()).toBe(0);
+    });
+
+    it('should set status to completed', async () => {
+      await router.processOpportunity(createOpportunityData({ id: 'opp-status-1' }), false);
+      router.updateOpportunityStatus('opp-status-1', 'completed');
+      const opp = router.getOpportunities().get('opp-status-1');
+      expect(opp?.status).toBe('completed');
+    });
+
+    it('should set status to failed', async () => {
+      await router.processOpportunity(createOpportunityData({ id: 'opp-status-2' }), false);
+      router.updateOpportunityStatus('opp-status-2', 'failed');
+      const opp = router.getOpportunities().get('opp-status-2');
+      expect(opp?.status).toBe('failed');
+    });
+
+    it('should set status to executing', async () => {
+      await router.processOpportunity(createOpportunityData({ id: 'opp-status-3' }), false);
+      router.updateOpportunityStatus('opp-status-3', 'executing');
+      const opp = router.getOpportunities().get('opp-status-3');
+      expect(opp?.status).toBe('executing');
+    });
+
+    it('should update actualProfit, gasCost, and netProfit', async () => {
+      await router.processOpportunity(createOpportunityData({ id: 'opp-profit-1' }), false);
+      router.updateOpportunityStatus('opp-profit-1', 'completed', {
+        actualProfit: 150,
+        gasCost: 10,
+        netProfit: 140,
+      });
+      const opp = router.getOpportunities().get('opp-profit-1');
+      expect(opp?.estimatedProfit).toBe(150);
+      expect(opp?.gasCost).toBe(10);
+      expect(opp?.netProfit).toBe(140);
+    });
+
+    it('should extend TTL to 5 minutes in the future', async () => {
+      const before = Date.now();
+      await router.processOpportunity(createOpportunityData({ id: 'opp-ttl-1' }), false);
+      router.updateOpportunityStatus('opp-ttl-1', 'completed');
+      const opp = router.getOpportunities().get('opp-ttl-1');
+      // TTL should be ~5 minutes from now
+      expect(opp?.expiresAt).toBeGreaterThanOrEqual(before + 5 * 60 * 1000 - 100);
+      expect(opp?.expiresAt).toBeLessThanOrEqual(Date.now() + 5 * 60 * 1000 + 100);
+    });
+
+    it('should handle partial update (only gasCost)', async () => {
+      await router.processOpportunity(
+        createOpportunityData({ id: 'opp-partial', profitPercentage: 3.0 }),
+        false,
+      );
+      const beforeProfit = router.getOpportunities().get('opp-partial')?.estimatedProfit;
+      router.updateOpportunityStatus('opp-partial', 'failed', { gasCost: 25 });
+      const opp = router.getOpportunities().get('opp-partial');
+      expect(opp?.gasCost).toBe(25);
+      expect(opp?.estimatedProfit).toBe(beforeProfit); // Unchanged
+    });
+  });
 });

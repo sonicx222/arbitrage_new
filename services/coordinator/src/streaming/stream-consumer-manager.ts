@@ -203,19 +203,33 @@ export class StreamConsumerManager {
     handler: (msg: StreamMessage) => Promise<void>
   ): (msg: StreamMessage) => Promise<void> {
     return async (msg: StreamMessage) => {
+      let handlerSucceeded = false;
       try {
         await handler(msg);
-        // Success: ACK the message
-        await this.ackMessage(groupConfig, msg.id);
+        handlerSucceeded = true;
       } catch (error) {
-        // Failure: Move to DLQ, then ACK to prevent infinite retries
+        // Failure: Move to DLQ to prevent data loss
         this.logger.error('Message handler failed, moving to DLQ', {
           stream: groupConfig.streamName,
           messageId: msg.id,
           error: (error as Error).message,
         });
         await this.moveToDeadLetterQueue(msg, error as Error, groupConfig.streamName);
-        await this.ackMessage(groupConfig, msg.id);
+      } finally {
+        // P2-12 FIX: Always ACK to prevent permanent PEL growth.
+        // Previously, if moveToDeadLetterQueue threw AND ackMessage threw,
+        // the message stayed permanently in PEL. try/finally ensures ACK
+        // is always attempted regardless of DLQ write outcome.
+        try {
+          await this.ackMessage(groupConfig, msg.id);
+        } catch (ackError) {
+          this.logger.error('Failed to ACK message — will be redelivered', {
+            stream: groupConfig.streamName,
+            messageId: msg.id,
+            handlerSucceeded,
+            error: (ackError as Error).message,
+          });
+        }
       }
     };
   }

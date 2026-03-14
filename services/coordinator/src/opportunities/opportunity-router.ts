@@ -229,14 +229,22 @@ export interface OpportunityRouterConfig {
  * Fast L2s and Solana produce blocks much faster than the 60s global TTL,
  * so opportunities go stale before execution.
  */
+/**
+ * P2-10 FIX: Differentiate L2 TTL overrides by actual block time.
+ * Arbitrum/Optimism/Base have ~250ms blocks — opps go stale 12x faster than Scroll (3s).
+ * Previously all L2s shared 15s, causing stale Arbitrum opps to be forwarded.
+ */
 const DEFAULT_CHAIN_TTL_OVERRIDES: Record<string, number> = {
-  arbitrum: 15000,   // ~60 blocks at 250ms
-  optimism: 15000,   // Similar to Arbitrum
-  base: 15000,       // Optimism-based
-  zksync: 15000,     // ~15 blocks at 1s
-  linea: 15000,      // Similar L2 characteristics
-  solana: 10000,     // ~25 slots at 400ms
-  // H-02 FIX: Added Mantle, Mode, Blast, Scroll — all L2s with fast block times
+  // Ultra-fast L2s (~250ms blocks) — tighter TTL
+  arbitrum: 10000,   // ~40 blocks at 250ms
+  optimism: 10000,   // Similar to Arbitrum
+  base: 10000,       // Optimism-based, ~250ms
+  // Medium L2s (~1s blocks)
+  zksync: 12000,     // ~12 blocks at 1s
+  linea: 12000,      // Similar L2 characteristics (~1s)
+  // Solana (~400ms slots) — tightest
+  solana: 8000,      // ~20 slots at 400ms
+  // Slower L2s (~2-3s blocks)
   mantle: 15000,     // ~7 blocks at 2s
   mode: 15000,       // ~7 blocks at 2s
   blast: 15000,      // ~7 blocks at 2s (Optimism-based)
@@ -347,6 +355,8 @@ export class OpportunityRouter {
   // The coordinator auto-skip threshold is now 10, so warning at 5 gives
   // operators advance notice before the skip fires.
   private static readonly CONSECUTIVE_EXPIRED_WARN_THRESHOLD = 5;
+  // PERF-M-01 FIX: Reusable Set buffer to avoid allocating new Set(processedIds) per batch.
+  private readonly _processedSetBuffer = new Set<string>();
 
   constructor(
     logger: OpportunityRouterLogger,
@@ -1045,7 +1055,11 @@ export class OpportunityRouter {
 
     // Also ACK deduplicated (skipped) opportunities — they were intentionally
     // superseded by a fresher version and must not remain pending.
-    const processedSet = new Set(processedIds);
+    // PERF-M-01 FIX: Build Set incrementally during scored loop above
+    // instead of allocating new Set(processedIds) at the end of every batch.
+    const processedSet = this._processedSetBuffer;
+    processedSet.clear();
+    for (const id of processedIds) processedSet.add(id);
     for (const opp of parsed) {
       if (!processedSet.has(opp.streamMessageId)) {
         processedIds.push(opp.streamMessageId);
@@ -1124,6 +1138,16 @@ export class OpportunityRouter {
     // Uses buyChain for cross-chain opps (buy-side determines execution group);
     // falls back to chain for intra-chain opps; falls back to single stream if unknown.
     const chainId = opportunity.buyChain ?? opportunity.chain;
+
+    // P2-9 FIX: Check Solana feature flag before routing. When FEATURE_SOLANA_EXECUTION
+    // is disabled but chain-group routing is enabled, Solana opps route to
+    // EXEC_REQUESTS_SOLANA with no consumer, silently accumulating until MAXLEN trim.
+    if (chainId === 'solana' && !FEATURE_FLAGS.useSolanaExecution) {
+      this._rejectedChain++;
+      this.logger.debug('Solana execution disabled — rejecting opportunity', { id: opportunity.id });
+      return;
+    }
+
     const targetStream = (this.config.chainGroupStreamResolver && chainId)
       ? this.config.chainGroupStreamResolver(chainId)
       : this.config.executionRequestsStream;

@@ -1216,3 +1216,793 @@ describe('OP-10 Regression: Execution Result Consumer', () => {
     expect(metrics.totalProfit).toBe(0); // Negative profit not added
   });
 });
+
+// =============================================================================
+// TQ-H-01: checkPipelineStarvation
+// =============================================================================
+
+describe('CoordinatorService.checkPipelineStarvation', () => {
+  let coordinator: CoordinatorService;
+
+  beforeEach(() => {
+    coordinator = new CoordinatorService({
+      port: 0,
+      consumerGroup: 'test-group',
+      consumerId: 'test-consumer',
+    });
+  });
+
+  afterEach(async () => {
+    try { await coordinator.stop(); } catch { /* cleanup */ }
+  });
+
+  function setPrivate(field: string, value: unknown): void {
+    (coordinator as any)[field] = value;
+  }
+
+  function getPrivate(field: string): unknown {
+    return (coordinator as any)[field];
+  }
+
+  function createMockStreams(overrides: Record<string, unknown> = {}): Record<string, jest.Mock> {
+    return {
+      checkStreamLag: jest.fn().mockResolvedValue({
+        length: 0, maxLen: 100000, lagRatio: 0, backpressure: false,
+        critical: false, pendingCount: 0, pendingRatio: 0,
+        ...overrides,
+      }),
+      xlen: jest.fn().mockResolvedValue(0),
+    } as any;
+  }
+
+  it('should skip when streamsClient is null', async () => {
+    setPrivate('streamsClient', null);
+    // Should not throw
+    await (coordinator as any).checkPipelineStarvation();
+  });
+
+  it('should skip during startup grace period', async () => {
+    setPrivate('streamsClient', createMockStreams());
+    setPrivate('startTime', Date.now()); // Just started — within grace period
+    await (coordinator as any).checkPipelineStarvation();
+    // checkStreamLag should not be called
+    expect((getPrivate('streamsClient') as any).checkStreamLag).not.toHaveBeenCalled();
+  });
+
+  it('should reset tracking when pending messages exist', async () => {
+    const mockStreams = createMockStreams({ pendingCount: 5 });
+    setPrivate('streamsClient', mockStreams);
+    setPrivate('startTime', Date.now() - 300_000); // Well past grace period
+    setPrivate('lastExecutionRequestTime', Date.now() - 600_000); // Stale
+    setPrivate('pipelineStarvationAlerted', true);
+
+    await (coordinator as any).checkPipelineStarvation();
+
+    expect(getPrivate('pipelineStarvationAlerted')).toBe(false);
+    // lastExecutionRequestTime should be updated to recent
+    expect(getPrivate('lastExecutionRequestTime') as number).toBeGreaterThan(Date.now() - 1000);
+  });
+
+  it('should not alert when no healthy detectors exist', async () => {
+    const mockStreams = createMockStreams({ pendingCount: 0 });
+    setPrivate('streamsClient', mockStreams);
+    setPrivate('startTime', Date.now() - 300_000);
+    setPrivate('lastExecutionRequestTime', Date.now() - 600_000);
+    // serviceHealth map is empty by default (no healthy detectors)
+
+    const alerts: unknown[] = [];
+    (coordinator as any).sendAlert = (alert: unknown) => alerts.push(alert);
+
+    await (coordinator as any).checkPipelineStarvation();
+
+    expect(alerts).toHaveLength(0);
+  });
+
+  it('should initialize tracking on first check', async () => {
+    const mockStreams = createMockStreams({ pendingCount: 0 });
+    setPrivate('streamsClient', mockStreams);
+    setPrivate('startTime', Date.now() - 300_000);
+    setPrivate('lastExecutionRequestTime', 0); // Not yet initialized
+
+    // Add a healthy detector
+    const healthMap = coordinator.getServiceHealthMap();
+    healthMap.set('partition-asia-fast', {
+      name: 'partition-asia-fast',
+      status: 'healthy',
+      lastHeartbeat: Date.now(),
+    } as any);
+
+    await (coordinator as any).checkPipelineStarvation();
+
+    // Should initialize but not alert
+    expect(getPrivate('lastExecutionRequestTime') as number).toBeGreaterThan(0);
+    expect(getPrivate('pipelineStarvationAlerted')).toBeFalsy();
+  });
+
+  it('should not alert when starvation duration is below threshold', async () => {
+    const mockStreams = createMockStreams({ pendingCount: 0 });
+    setPrivate('streamsClient', mockStreams);
+    setPrivate('startTime', Date.now() - 300_000);
+    setPrivate('lastExecutionRequestTime', Date.now() - 60_000); // 1 min ago (below 5 min threshold)
+
+    const healthMap = coordinator.getServiceHealthMap();
+    healthMap.set('partition-asia-fast', {
+      name: 'partition-asia-fast',
+      status: 'healthy',
+      lastHeartbeat: Date.now(),
+    } as any);
+
+    const alerts: unknown[] = [];
+    (coordinator as any).sendAlert = (alert: unknown) => alerts.push(alert);
+
+    await (coordinator as any).checkPipelineStarvation();
+
+    expect(alerts).toHaveLength(0);
+  });
+
+  it('should fire PIPELINE_STARVATION alert when threshold exceeded', async () => {
+    const mockStreams = createMockStreams({ pendingCount: 0 });
+    setPrivate('streamsClient', mockStreams);
+    setPrivate('startTime', Date.now() - 600_000);
+    setPrivate('lastExecutionRequestTime', Date.now() - 6 * 60_000); // 6 min ago (> 5 min threshold)
+    setPrivate('pipelineStarvationAlerted', false);
+
+    const healthMap = coordinator.getServiceHealthMap();
+    healthMap.set('partition-asia-fast', {
+      name: 'partition-asia-fast',
+      status: 'healthy',
+      lastHeartbeat: Date.now(),
+    } as any);
+
+    const alerts: any[] = [];
+    (coordinator as any).sendAlert = (alert: unknown) => alerts.push(alert);
+
+    await (coordinator as any).checkPipelineStarvation();
+
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].type).toBe('PIPELINE_STARVATION');
+    expect(alerts[0].severity).toBe('warning');
+    expect(alerts[0].data.healthyDetectors).toContain('partition-asia-fast');
+    expect(getPrivate('pipelineStarvationAlerted')).toBe(true);
+  });
+
+  it('should not double-alert when already alerted', async () => {
+    const mockStreams = createMockStreams({ pendingCount: 0 });
+    setPrivate('streamsClient', mockStreams);
+    setPrivate('startTime', Date.now() - 600_000);
+    setPrivate('lastExecutionRequestTime', Date.now() - 6 * 60_000);
+    setPrivate('pipelineStarvationAlerted', true); // Already alerted
+
+    const healthMap = coordinator.getServiceHealthMap();
+    healthMap.set('partition-l2-turbo', {
+      name: 'partition-l2-turbo',
+      status: 'healthy',
+      lastHeartbeat: Date.now(),
+    } as any);
+
+    const alerts: unknown[] = [];
+    (coordinator as any).sendAlert = (alert: unknown) => alerts.push(alert);
+
+    await (coordinator as any).checkPipelineStarvation();
+
+    expect(alerts).toHaveLength(0);
+  });
+
+  it('should exclude coordinator and execution-engine from healthy detector count', async () => {
+    const mockStreams = createMockStreams({ pendingCount: 0 });
+    setPrivate('streamsClient', mockStreams);
+    setPrivate('startTime', Date.now() - 300_000);
+    setPrivate('lastExecutionRequestTime', Date.now() - 6 * 60_000);
+
+    const healthMap = coordinator.getServiceHealthMap();
+    // Only coordinator and EE are "healthy" — these should be excluded
+    healthMap.set('coordinator', {
+      name: 'coordinator', status: 'healthy', lastHeartbeat: Date.now(),
+    } as any);
+    healthMap.set('execution-engine', {
+      name: 'execution-engine', status: 'healthy', lastHeartbeat: Date.now(),
+    } as any);
+
+    const alerts: unknown[] = [];
+    (coordinator as any).sendAlert = (alert: unknown) => alerts.push(alert);
+
+    await (coordinator as any).checkPipelineStarvation();
+
+    // No alert — coordinator and EE are excluded from "healthy detectors"
+    expect(alerts).toHaveLength(0);
+  });
+});
+
+// =============================================================================
+// TQ-M-02: processOneExecutionResult PROFIT_SANITY_CAP boundary tests
+// =============================================================================
+
+describe('CoordinatorService.processOneExecutionResult', () => {
+  let coordinator: CoordinatorService;
+
+  beforeEach(async () => {
+    coordinator = new CoordinatorService();
+    // Initialize systemMetrics
+    const metrics = (coordinator as any).initializeMetrics();
+    (coordinator as any).systemMetrics = metrics;
+    // Mock opportunityRouter to prevent null errors
+    (coordinator as any).opportunityRouter = {
+      updateOpportunityStatus: jest.fn(),
+    };
+    // Mock emitSSE to prevent null errors
+    (coordinator as any).emitSSE = jest.fn();
+  });
+
+  it('should add profit below $100K to totalProfit', () => {
+    const rawResult = { actualProfit: 99_999, gasCost: 10, dex: 'uniswap', gasUsed: 21000, timestamp: Date.now() };
+    (coordinator as any).processOneExecutionResult(rawResult, true, 'opp-1', 'ethereum');
+    expect((coordinator as any).systemMetrics.totalProfit).toBe(99_999);
+  });
+
+  it('should NOT add profit at exactly $100K (check is strictly < cap)', () => {
+    const rawResult = { actualProfit: 100_000, gasCost: 10, dex: 'uniswap' };
+    (coordinator as any).processOneExecutionResult(rawResult, true, 'opp-1', 'ethereum');
+    expect((coordinator as any).systemMetrics.totalProfit).toBe(0);
+  });
+
+  it('should NOT add profit above $100K', () => {
+    const rawResult = { actualProfit: 100_001, gasCost: 10, dex: 'uniswap' };
+    (coordinator as any).processOneExecutionResult(rawResult, true, 'opp-1', 'ethereum');
+    expect((coordinator as any).systemMetrics.totalProfit).toBe(0);
+  });
+
+  it('should NOT add zero profit', () => {
+    const rawResult = { actualProfit: 0, gasCost: 10, dex: 'uniswap' };
+    (coordinator as any).processOneExecutionResult(rawResult, true, 'opp-1', 'ethereum');
+    expect((coordinator as any).systemMetrics.totalProfit).toBe(0);
+  });
+
+  it('should NOT add profit for failed execution', () => {
+    const rawResult = { actualProfit: 500, gasCost: 10, dex: 'uniswap' };
+    (coordinator as any).processOneExecutionResult(rawResult, false, 'opp-1', 'ethereum');
+    expect((coordinator as any).systemMetrics.totalProfit).toBe(0);
+    expect((coordinator as any).systemMetrics.successfulExecutions).toBe(0);
+  });
+
+  it('should increment successfulExecutions on success', () => {
+    const rawResult = { actualProfit: 50, gasCost: 10, dex: 'uniswap' };
+    (coordinator as any).processOneExecutionResult(rawResult, true, 'opp-1', 'ethereum');
+    expect((coordinator as any).systemMetrics.successfulExecutions).toBe(1);
+  });
+
+  it('should respect custom PROFIT_SANITY_CAP_USD from env', () => {
+    process.env.PROFIT_SANITY_CAP_USD = '500';
+    const rawResult = { actualProfit: 499, gasCost: 10, dex: 'uniswap' };
+    (coordinator as any).processOneExecutionResult(rawResult, true, 'opp-1', 'ethereum');
+    expect((coordinator as any).systemMetrics.totalProfit).toBe(499);
+
+    const rawResult2 = { actualProfit: 501, gasCost: 10, dex: 'uniswap' };
+    (coordinator as any).processOneExecutionResult(rawResult2, true, 'opp-2', 'ethereum');
+    // totalProfit should still be 499 (501 was rejected)
+    expect((coordinator as any).systemMetrics.totalProfit).toBe(499);
+    delete process.env.PROFIT_SANITY_CAP_USD;
+  });
+});
+
+// =============================================================================
+// TQ-M-04: handleHealthMessage branch coverage tests
+// =============================================================================
+
+describe('CoordinatorService.handleHealthMessage', () => {
+  let coordinator: CoordinatorService;
+
+  beforeEach(async () => {
+    coordinator = new CoordinatorService();
+    // Initialize required state
+    (coordinator as any).serviceHealth = new Map();
+    (coordinator as any).healthMonitor = { recordHeartbeat: jest.fn(), evaluateDegradationLevel: jest.fn(), getDegradationLevel: jest.fn() };
+  });
+
+  it('should skip message with null data', async () => {
+    await (coordinator as any).handleHealthMessage({ id: 'msg-1', data: null });
+    expect((coordinator as any).serviceHealth.size).toBe(0);
+  });
+
+  it('should skip message with non-object data', async () => {
+    await (coordinator as any).handleHealthMessage({ id: 'msg-2', data: 'not-an-object' });
+    expect((coordinator as any).serviceHealth.size).toBe(0);
+  });
+
+  it('should skip message with missing service name', async () => {
+    await (coordinator as any).handleHealthMessage({ id: 'msg-3', data: { status: 'healthy' } });
+    expect((coordinator as any).serviceHealth.size).toBe(0);
+  });
+
+  it('should process message with "name" field (new format)', async () => {
+    await (coordinator as any).handleHealthMessage({
+      id: 'msg-4',
+      data: { name: 'partition-1', status: 'healthy', timestamp: Date.now() },
+    });
+    expect((coordinator as any).serviceHealth.has('partition-1')).toBe(true);
+    expect((coordinator as any).serviceHealth.get('partition-1').status).toBe('healthy');
+  });
+
+  it('should process message with "service" field (legacy format)', async () => {
+    await (coordinator as any).handleHealthMessage({
+      id: 'msg-5',
+      data: { service: 'execution-engine', status: 'healthy', timestamp: Date.now() },
+    });
+    expect((coordinator as any).serviceHealth.has('execution-engine')).toBe(true);
+  });
+
+  it('should default unknown status to "unhealthy"', async () => {
+    await (coordinator as any).handleHealthMessage({
+      id: 'msg-6',
+      data: { name: 'test-svc', status: 'totally-broken', timestamp: Date.now() },
+    });
+    expect((coordinator as any).serviceHealth.get('test-svc').status).toBe('unhealthy');
+  });
+
+  it('should accept "starting" and "stopping" as valid statuses', async () => {
+    await (coordinator as any).handleHealthMessage({
+      id: 'msg-7',
+      data: { name: 'svc-a', status: 'starting', timestamp: Date.now() },
+    });
+    expect((coordinator as any).serviceHealth.get('svc-a').status).toBe('starting');
+
+    await (coordinator as any).handleHealthMessage({
+      id: 'msg-8',
+      data: { name: 'svc-b', status: 'stopping', timestamp: Date.now() },
+    });
+    expect((coordinator as any).serviceHealth.get('svc-b').status).toBe('stopping');
+  });
+
+  it('should NOT overwrite coordinator own health entry', async () => {
+    (coordinator as any).serviceHealth.set('coordinator', { name: 'coordinator', status: 'healthy', lastHeartbeat: 999 });
+    await (coordinator as any).handleHealthMessage({
+      id: 'msg-9',
+      data: { name: 'coordinator', status: 'degraded', timestamp: Date.now() },
+    });
+    // Should still be 'healthy' — own entry not overwritten
+    expect((coordinator as any).serviceHealth.get('coordinator').status).toBe('healthy');
+  });
+
+  it('should call healthMonitor.recordHeartbeat with service name', async () => {
+    await (coordinator as any).handleHealthMessage({
+      id: 'msg-10',
+      data: { name: 'detector-1', status: 'healthy', timestamp: Date.now() },
+    });
+    expect((coordinator as any).healthMonitor.recordHeartbeat).toHaveBeenCalledWith('detector-1');
+  });
+});
+
+// =============================================================================
+// TQ-M-05: skipStaleOpportunityBacklogIfNeeded tests
+// =============================================================================
+
+describe('CoordinatorService.skipStaleOpportunityBacklogIfNeeded', () => {
+  let coordinator: CoordinatorService;
+
+  beforeEach(async () => {
+    coordinator = new CoordinatorService();
+    (coordinator as any).consecutiveExpiredThreshold = 10;
+  });
+
+  it('should be no-op when opportunityRouter is null', async () => {
+    (coordinator as any).opportunityRouter = null;
+    (coordinator as any).streamsClient = { createConsumerGroup: jest.fn() };
+    await (coordinator as any).skipStaleOpportunityBacklogIfNeeded();
+    // Should not throw
+  });
+
+  it('should be no-op when streamsClient is null', async () => {
+    (coordinator as any).opportunityRouter = { getConsecutiveExpired: jest.fn().mockReturnValue(20) };
+    (coordinator as any).streamsClient = null;
+    await (coordinator as any).skipStaleOpportunityBacklogIfNeeded();
+    // Should not throw
+  });
+
+  it('should not skip when consecutiveExpired is below threshold', async () => {
+    (coordinator as any).opportunityRouter = { getConsecutiveExpired: jest.fn().mockReturnValue(5) };
+    const mockStreams = { createConsumerGroup: jest.fn(), xlen: jest.fn().mockResolvedValue(100) };
+    (coordinator as any).streamsClient = mockStreams;
+    await (coordinator as any).skipStaleOpportunityBacklogIfNeeded();
+    expect(mockStreams.createConsumerGroup).not.toHaveBeenCalled();
+  });
+
+  it('should skip backlog when consecutiveExpired >= threshold', async () => {
+    (coordinator as any).opportunityRouter = {
+      getConsecutiveExpired: jest.fn().mockReturnValue(15),
+      resetConsecutiveExpired: jest.fn(),
+    };
+    const mockStreams = {
+      createConsumerGroup: jest.fn().mockResolvedValue(undefined),
+      xlen: jest.fn().mockResolvedValue(500),
+    };
+    (coordinator as any).streamsClient = mockStreams;
+    await (coordinator as any).skipStaleOpportunityBacklogIfNeeded();
+    expect(mockStreams.createConsumerGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ startId: '$' })
+    );
+  });
+
+  it('should not throw when xlen fails (best-effort estimation)', async () => {
+    (coordinator as any).opportunityRouter = {
+      getConsecutiveExpired: jest.fn().mockReturnValue(10),
+      resetConsecutiveExpired: jest.fn(),
+    };
+    const mockStreams = {
+      createConsumerGroup: jest.fn().mockResolvedValue(undefined),
+      xlen: jest.fn().mockRejectedValue(new Error('Redis error')),
+    };
+    (coordinator as any).streamsClient = mockStreams;
+    await (coordinator as any).skipStaleOpportunityBacklogIfNeeded();
+    // Should still attempt the skip despite xlen failure
+    expect(mockStreams.createConsumerGroup).toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// TQ-M-02: PROFIT_SANITY_CAP boundary tests for processOneExecutionResult
+// =============================================================================
+
+describe('CoordinatorService.processOneExecutionResult — PROFIT_SANITY_CAP boundaries', () => {
+  let coordinator: CoordinatorService;
+
+  beforeEach(() => {
+    // Clear any custom cap from previous tests
+    delete process.env.PROFIT_SANITY_CAP_USD;
+    coordinator = new CoordinatorService({
+      port: 0,
+      consumerGroup: 'test-group',
+      consumerId: 'test-consumer',
+    });
+  });
+
+  afterEach(async () => {
+    delete process.env.PROFIT_SANITY_CAP_USD;
+    try { await coordinator.stop(); } catch { /* cleanup */ }
+  });
+
+  it('should add profit of $99,999 to totalProfit (below cap)', () => {
+    const rawResult = { actualProfit: 99_999, gasCost: 10, dex: 'uniswap' };
+    (coordinator as any).processOneExecutionResult(rawResult, true, 'opp-cap-1', 'ethereum');
+
+    const metrics = coordinator.getSystemMetrics();
+    expect(metrics.totalProfit).toBe(99_999);
+    expect(metrics.successfulExecutions).toBe(1);
+  });
+
+  it('should NOT add profit of $100,001 to totalProfit (above cap)', () => {
+    const rawResult = { actualProfit: 100_001, gasCost: 10, dex: 'uniswap' };
+    (coordinator as any).processOneExecutionResult(rawResult, true, 'opp-cap-2', 'ethereum');
+
+    const metrics = coordinator.getSystemMetrics();
+    expect(metrics.totalProfit).toBe(0);
+    // successfulExecutions still increments — only profit is capped
+    expect(metrics.successfulExecutions).toBe(1);
+  });
+
+  it('should NOT add profit of exactly $100,000 to totalProfit (check is < not <=)', () => {
+    const rawResult = { actualProfit: 100_000, gasCost: 10, dex: 'uniswap' };
+    (coordinator as any).processOneExecutionResult(rawResult, true, 'opp-cap-3', 'ethereum');
+
+    const metrics = coordinator.getSystemMetrics();
+    expect(metrics.totalProfit).toBe(0);
+    expect(metrics.successfulExecutions).toBe(1);
+  });
+
+  it('should not add profit of $0 to totalProfit (check is > 0)', () => {
+    const rawResult = { actualProfit: 0, gasCost: 5, dex: 'uniswap' };
+    (coordinator as any).processOneExecutionResult(rawResult, true, 'opp-cap-4', 'ethereum');
+
+    const metrics = coordinator.getSystemMetrics();
+    expect(metrics.totalProfit).toBe(0);
+    expect(metrics.successfulExecutions).toBe(1);
+  });
+
+  it('should not add profit on failed execution regardless of amount', () => {
+    const rawResult = { actualProfit: 500, gasCost: 10, dex: 'uniswap' };
+    (coordinator as any).processOneExecutionResult(rawResult, false, 'opp-cap-5', 'ethereum');
+
+    const metrics = coordinator.getSystemMetrics();
+    expect(metrics.totalProfit).toBe(0);
+    expect(metrics.successfulExecutions).toBe(0);
+  });
+
+  it('should not add negative profit to totalProfit', () => {
+    const rawResult = { actualProfit: -50, gasCost: 10, dex: 'uniswap' };
+    (coordinator as any).processOneExecutionResult(rawResult, true, 'opp-cap-6', 'ethereum');
+
+    const metrics = coordinator.getSystemMetrics();
+    expect(metrics.totalProfit).toBe(0);
+    expect(metrics.successfulExecutions).toBe(1);
+  });
+});
+
+// =============================================================================
+// TQ-M-04: handleHealthMessage() branches
+// =============================================================================
+
+describe('CoordinatorService.handleHealthMessage — branch coverage', () => {
+  let coordinator: CoordinatorService;
+
+  beforeEach(() => {
+    coordinator = new CoordinatorService({
+      port: 0,
+      consumerGroup: 'test-group',
+      consumerId: 'test-consumer',
+    });
+  });
+
+  afterEach(async () => {
+    try { await coordinator.stop(); } catch { /* cleanup */ }
+  });
+
+  it('should return without updating serviceHealth when data is null', async () => {
+    const message = { id: 'msg-1', data: null };
+    await (coordinator as any).handleHealthMessage(message);
+
+    expect(coordinator.getServiceHealthMap().size).toBe(0);
+  });
+
+  it('should return without updating serviceHealth when data is undefined', async () => {
+    const message = { id: 'msg-2', data: undefined };
+    await (coordinator as any).handleHealthMessage(message);
+
+    expect(coordinator.getServiceHealthMap().size).toBe(0);
+  });
+
+  it('should log debug and return when service name is missing', async () => {
+    const message = { id: 'msg-3', data: { status: 'healthy', uptime: 100 } };
+    await (coordinator as any).handleHealthMessage(message);
+
+    expect(coordinator.getServiceHealthMap().size).toBe(0);
+  });
+
+  it('should update serviceHealth for valid health message with "name" field', async () => {
+    const message = {
+      id: 'msg-4',
+      data: {
+        name: 'partition-asia-fast',
+        status: 'healthy',
+        uptime: 3600,
+        memoryUsage: 50_000_000,
+        cpuUsage: 25,
+        timestamp: Date.now(),
+      },
+    };
+    await (coordinator as any).handleHealthMessage(message);
+
+    const healthMap = coordinator.getServiceHealthMap();
+    expect(healthMap.has('partition-asia-fast')).toBe(true);
+    const health = healthMap.get('partition-asia-fast')!;
+    expect(health.name).toBe('partition-asia-fast');
+    expect(health.status).toBe('healthy');
+    expect(health.uptime).toBe(3600);
+    expect(health.memoryUsage).toBe(50_000_000);
+    expect(health.cpuUsage).toBe(25);
+  });
+
+  it('should update serviceHealth for valid health message with "service" field (legacy format)', async () => {
+    const message = {
+      id: 'msg-5',
+      data: {
+        service: 'execution-engine',
+        status: 'healthy',
+        uptime: 1200,
+        timestamp: Date.now(),
+      },
+    };
+    await (coordinator as any).handleHealthMessage(message);
+
+    const healthMap = coordinator.getServiceHealthMap();
+    expect(healthMap.has('execution-engine')).toBe(true);
+    expect(healthMap.get('execution-engine')!.name).toBe('execution-engine');
+  });
+
+  it('should default to "unhealthy" for unknown status value', async () => {
+    const message = {
+      id: 'msg-6',
+      data: {
+        name: 'some-service',
+        status: 'banana', // Invalid status
+        uptime: 100,
+        timestamp: Date.now(),
+      },
+    };
+    await (coordinator as any).handleHealthMessage(message);
+
+    const healthMap = coordinator.getServiceHealthMap();
+    expect(healthMap.get('some-service')!.status).toBe('unhealthy');
+  });
+
+  it('should NOT overwrite coordinator own entry in serviceHealth map (P0-4 fix)', async () => {
+    // Pre-populate coordinator entry
+    const healthMap = coordinator.getServiceHealthMap() as Map<string, any>;
+    const originalHealth = {
+      name: 'coordinator',
+      status: 'healthy',
+      lastHeartbeat: Date.now(),
+      uptime: 9999,
+    };
+    healthMap.set('coordinator', originalHealth);
+
+    const message = {
+      id: 'msg-7',
+      data: {
+        name: 'coordinator',
+        status: 'healthy',
+        uptime: 100,
+        timestamp: Date.now() - 5000, // Older timestamp from Redis round-trip
+      },
+    };
+    await (coordinator as any).handleHealthMessage(message);
+
+    // Should NOT have overwritten the original entry
+    expect(healthMap.get('coordinator')).toBe(originalHealth);
+    expect(healthMap.get('coordinator')!.uptime).toBe(9999);
+  });
+
+  it('should record heartbeat via healthMonitor', async () => {
+    // Set up a mock healthMonitor with a recordHeartbeat spy
+    const mockRecordHeartbeat = jest.fn();
+    (coordinator as any).healthMonitor = { recordHeartbeat: mockRecordHeartbeat };
+
+    const message = {
+      id: 'msg-8',
+      data: {
+        name: 'cross-chain-detector',
+        status: 'healthy',
+        uptime: 600,
+        timestamp: Date.now(),
+      },
+    };
+    await (coordinator as any).handleHealthMessage(message);
+
+    expect(mockRecordHeartbeat).toHaveBeenCalledWith('cross-chain-detector');
+  });
+
+  it('should handle valid statuses: degraded, starting, stopping', async () => {
+    const statuses = ['degraded', 'starting', 'stopping'] as const;
+    for (const status of statuses) {
+      const message = {
+        id: `msg-status-${status}`,
+        data: {
+          name: `svc-${status}`,
+          status,
+          uptime: 10,
+          timestamp: Date.now(),
+        },
+      };
+      await (coordinator as any).handleHealthMessage(message);
+      expect(coordinator.getServiceHealthMap().get(`svc-${status}`)!.status).toBe(status);
+    }
+  });
+});
+
+// =============================================================================
+// TQ-M-05: skipStaleOpportunityBacklogIfNeeded()
+// =============================================================================
+
+describe('CoordinatorService.skipStaleOpportunityBacklogIfNeeded', () => {
+  let coordinator: CoordinatorService;
+
+  beforeEach(() => {
+    coordinator = new CoordinatorService({
+      port: 0,
+      consumerGroup: 'test-group',
+      consumerId: 'test-consumer',
+      consecutiveExpiredThreshold: 10,
+    });
+  });
+
+  afterEach(async () => {
+    try { await coordinator.stop(); } catch { /* cleanup */ }
+  });
+
+  function setPrivate(field: string, value: unknown): void {
+    (coordinator as any)[field] = value;
+  }
+
+  it('should no-op when opportunityRouter is null', async () => {
+    const mockStreams = {
+      createConsumerGroup: jest.fn(),
+      xlen: jest.fn(),
+    };
+    setPrivate('opportunityRouter', null);
+    setPrivate('streamsClient', mockStreams);
+
+    await (coordinator as any).skipStaleOpportunityBacklogIfNeeded();
+
+    expect(mockStreams.createConsumerGroup).not.toHaveBeenCalled();
+  });
+
+  it('should no-op when streamsClient is null', async () => {
+    const mockRouter = {
+      getConsecutiveExpired: jest.fn().mockReturnValue(100),
+      resetConsecutiveExpired: jest.fn(),
+    };
+    setPrivate('opportunityRouter', mockRouter);
+    setPrivate('streamsClient', null);
+
+    await (coordinator as any).skipStaleOpportunityBacklogIfNeeded();
+
+    expect(mockRouter.getConsecutiveExpired).not.toHaveBeenCalled();
+  });
+
+  it('should no-op when consecutiveExpired is below threshold', async () => {
+    const mockRouter = {
+      getConsecutiveExpired: jest.fn().mockReturnValue(5), // Below threshold of 10
+      resetConsecutiveExpired: jest.fn(),
+    };
+    const mockStreams = {
+      createConsumerGroup: jest.fn(),
+      xlen: jest.fn(),
+    };
+    setPrivate('opportunityRouter', mockRouter);
+    setPrivate('streamsClient', mockStreams);
+
+    await (coordinator as any).skipStaleOpportunityBacklogIfNeeded();
+
+    expect(mockStreams.createConsumerGroup).not.toHaveBeenCalled();
+    expect(mockRouter.resetConsecutiveExpired).not.toHaveBeenCalled();
+  });
+
+  it('should call createConsumerGroup with startId="$" when threshold is met', async () => {
+    const mockRouter = {
+      getConsecutiveExpired: jest.fn().mockReturnValue(10), // Exactly at threshold
+      resetConsecutiveExpired: jest.fn(),
+    };
+    const mockStreams = {
+      createConsumerGroup: jest.fn().mockResolvedValue(undefined),
+      xlen: jest.fn().mockResolvedValue(500),
+    };
+    setPrivate('opportunityRouter', mockRouter);
+    setPrivate('streamsClient', mockStreams);
+
+    await (coordinator as any).skipStaleOpportunityBacklogIfNeeded();
+
+    expect(mockStreams.createConsumerGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startId: '$',
+        resetToStartIdOnExistingGroup: true,
+        groupName: 'test-group',
+        consumerName: 'test-consumer',
+      }),
+    );
+    expect(mockRouter.resetConsecutiveExpired).toHaveBeenCalled();
+  });
+
+  it('should call createConsumerGroup when consecutiveExpired exceeds threshold', async () => {
+    const mockRouter = {
+      getConsecutiveExpired: jest.fn().mockReturnValue(25), // Well above threshold
+      resetConsecutiveExpired: jest.fn(),
+    };
+    const mockStreams = {
+      createConsumerGroup: jest.fn().mockResolvedValue(undefined),
+      xlen: jest.fn().mockResolvedValue(1000),
+    };
+    setPrivate('opportunityRouter', mockRouter);
+    setPrivate('streamsClient', mockStreams);
+
+    await (coordinator as any).skipStaleOpportunityBacklogIfNeeded();
+
+    expect(mockStreams.createConsumerGroup).toHaveBeenCalledTimes(1);
+    expect(mockRouter.resetConsecutiveExpired).toHaveBeenCalledTimes(1);
+  });
+
+  it('should not reset consecutiveExpired when createConsumerGroup fails', async () => {
+    const mockRouter = {
+      getConsecutiveExpired: jest.fn().mockReturnValue(15),
+      resetConsecutiveExpired: jest.fn(),
+    };
+    const mockStreams = {
+      createConsumerGroup: jest.fn().mockRejectedValue(new Error('Redis connection lost')),
+      xlen: jest.fn().mockResolvedValue(200),
+    };
+    setPrivate('opportunityRouter', mockRouter);
+    setPrivate('streamsClient', mockStreams);
+
+    await (coordinator as any).skipStaleOpportunityBacklogIfNeeded();
+
+    expect(mockStreams.createConsumerGroup).toHaveBeenCalled();
+    // resetConsecutiveExpired should NOT be called because createConsumerGroup threw
+    expect(mockRouter.resetConsecutiveExpired).not.toHaveBeenCalled();
+  });
+});

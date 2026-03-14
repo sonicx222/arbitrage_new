@@ -14,6 +14,20 @@ import { parseEnvIntSafe } from '@arbitrage/core/utils/env-utils';
 import type { MinimalLogger } from '../types';
 import { RedisRateLimitStore } from './redis-rate-limit-store';
 
+/** P2-2 FIX: Module-level store reference for shutdown cleanup. */
+let _rateLimitStore: RedisRateLimitStore | null = null;
+
+/**
+ * P2-2 FIX: Shut down the Redis rate-limit store's ioredis connection.
+ * Called from coordinator.stop() to prevent leaked connections blocking clean exit.
+ */
+export async function shutdownRateLimitStore(): Promise<void> {
+  if (_rateLimitStore) {
+    await _rateLimitStore.shutdown();
+    _rateLimitStore = null;
+  }
+}
+
 /**
  * Configure all middleware on an Express application.
  *
@@ -77,9 +91,12 @@ export function configureMiddleware(app: Application, logger: MinimalLogger): vo
   // Opt-in via RATE_LIMIT_STORE=redis (requires REDIS_URL).
   // Falls back to in-memory store (single-instance only) when not configured.
   const useRedisStore = process.env.RATE_LIMIT_STORE === 'redis' && process.env.REDIS_URL;
+  // P2-1 FIX: Pass structured logger to store for OTEL transport + log-level filtering.
   const store = useRedisStore
-    ? new RedisRateLimitStore(process.env.REDIS_URL!, 'coordinator:rl:')
+    ? new RedisRateLimitStore(process.env.REDIS_URL!, 'coordinator:rl:', logger)
     : undefined; // undefined = express-rate-limit default MemoryStore
+  // P2-2 FIX: Store reference for shutdown (ioredis connection cleanup).
+  _rateLimitStore = store ?? null;
 
   if (!useRedisStore && process.env.NODE_ENV === 'production') {
     logger.warn('Rate limiter using in-memory store. Set RATE_LIMIT_STORE=redis for multi-instance deployment.');

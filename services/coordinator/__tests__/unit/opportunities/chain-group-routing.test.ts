@@ -9,6 +9,12 @@
  * @see docs/reports/EXECUTION_BOTTLENECK_RESEARCH_2026-03-06.md — Phase 2
  */
 
+// P2-9: Mock FEATURE_FLAGS to enable Solana execution in tests
+jest.mock('@arbitrage/config', () => ({
+  ...jest.requireActual('@arbitrage/config'),
+  FEATURE_FLAGS: { useSolanaExecution: true, useCexPriceSignals: false },
+}));
+
 // Mock @arbitrage/core to prevent deep import chain
 jest.mock('@arbitrage/core', () => ({
   findKSmallest: jest.fn((items: unknown[], k: number, compareFn: (a: unknown, b: unknown) => number) => {

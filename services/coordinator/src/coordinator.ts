@@ -52,6 +52,7 @@ import { getCexPriceFeedService, resetCexPriceFeedService } from '@arbitrage/cor
 // FIX: Import Logger and Alert from consolidated api/types (single source of truth)
 import {
   configureMiddleware,
+  shutdownRateLimitStore,
   setupAllRoutes,
   SystemMetrics,
   CoordinatorStateProvider,
@@ -307,7 +308,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
   // Startup grace period: Don't report critical alerts during initial startup
   // This prevents false alerts when services haven't reported health yet
-  private static readonly STARTUP_GRACE_PERIOD_MS = 120000; // 120 seconds — partitions take 59-80s to register
+  // P1-2 FIX: Aligned to 180s to match HealthMonitor's requirement for vault-model
+  // adapters (GMX, Beethoven X) that take 60-90s to initialize. 120s caused false
+  // degradation alerts before slow-initializing services could register.
+  private static readonly STARTUP_GRACE_PERIOD_MS = 180000; // 180 seconds
   private startTime: number = 0;
 
   // P2-11: Centralized interval management (replaces individual interval fields)
@@ -1012,6 +1016,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // preventing stopTimerPool() from firing when the server force-closes.
       shutdownSSE();
 
+      // P2-2 FIX: Shut down RedisRateLimitStore's ioredis connection.
+      // Previously this connection persisted after shutdown, blocking clean exit.
+      await shutdownRateLimitStore();
+
       // Close HTTP server gracefully
       if (this.server) {
         // P2 FIX: Capture server reference to satisfy TypeScript null check
@@ -1348,6 +1356,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // Batch mode bypasses the per-message handler; autoAck: true lets StreamConsumer
       // ACK the IDs returned by the batch handler. Other streams keep deferred ACK
       // via streamConsumerManager.wrapHandler.
+      //
+      // P1-3 DESIGN DECISION: Batch handlers intentionally bypass withRateLimit().
+      // These consume INTERNAL Redis streams (not external HTTP requests), so rate
+      // limiting provides no security value. Adding per-message rate checks on the
+      // hot path would add ~1-2ms/batch for zero benefit. If a compromised partition
+      // floods opportunities, the admission control budget (line 503) already caps
+      // forwarding to EE — that is the correct throttle point, not rate limiting.
       const useOpportunityBatch = groupConfig.streamName === RedisStreams.OPPORTUNITIES
         && !!this.opportunityRouter;
       const usePriceUpdateBatch = groupConfig.streamName === RedisStreams.PRICE_UPDATES;
@@ -1779,9 +1794,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
     const actualProfit = getNumber(rawResult, 'actualProfit', 0);
     const gasCost = getNumber(rawResult, 'gasCost', 0);
 
-    // Sanity cap: reject per-execution profit above $100k — likely bad data from
-    // mispriced DEX oracles on newer L2s (Linea, Mode, Scroll)
-    const PROFIT_SANITY_CAP = 100_000;
+    // P2-14 FIX: Configurable sanity cap via env var. Default $100K.
+    // Reject per-execution profit above cap — likely bad data from mispriced DEX oracles.
+    const PROFIT_SANITY_CAP = safeParseFloat(process.env.PROFIT_SANITY_CAP_USD, 100_000);
 
     if (success) {
       this.systemMetrics.successfulExecutions++;
@@ -1831,6 +1846,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * @see services/execution-engine/src/engine.ts publishExecutionResult()
    */
   private async handleExecutionResultBatch(messages: StreamMessage[]): Promise<string[]> {
+    // P2-4 FIX: Wrap batch in withLogContext for automatic traceId/spanId in log entries.
+    // The single-message handler (line 1925) already does this; the batch handler was missing it.
+    const batchTrace = createFastTraceContext('coordinator');
+    return withLogContext({ traceId: batchTrace.traceId, spanId: batchTrace.spanId }, async () => {
     const processedIds: string[] = [];
     let batchSuccesses = 0;
     let batchFailures = 0;
@@ -1890,6 +1909,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
     }
 
     return processedIds;
+    }); // end withLogContext (P2-4)
   }
 
   /**
@@ -2066,6 +2086,18 @@ export class CoordinatorService implements CoordinatorStateProvider {
                 timestamp: Date.now(),
               });
             }
+            // P2-7 FIX: Alert when backpressure deactivates so operators know when
+            // the system recovers. Previously only activation was alerted — operators
+            // learned when backpressure started but never when it ended.
+            if (!isActive && wasActive) {
+              this.sendAlert({
+                type: 'BACKPRESSURE_DEACTIVATED',
+                message: `Execution stream backpressure deactivated (depth ratio: ${lag.lagRatio.toFixed(2)}, threshold: ${this.executionStreamBackpressureRatio})`,
+                severity: 'low',
+                data: { depthRatio: lag.lagRatio, threshold: this.executionStreamBackpressureRatio },
+                timestamp: Date.now(),
+              });
+            }
           }
 
           // Report own health to stream (for other services to consume).
@@ -2080,14 +2112,15 @@ export class CoordinatorService implements CoordinatorStateProvider {
           this.logger.error('Metrics update failed', { error });
         }
       },
-      5000
+      // P2-15 FIX: Configurable metrics update interval (default 5s).
+      safeParseInt(process.env.COORDINATOR_METRICS_INTERVAL_MS, 5000)
     );
 
     // P0-3 FIX: Legacy health polling REMOVED (was deprecated since v2.0.0)
     // All services now use Redis Streams exclusively (ADR-002)
     // See REFACTORING_IMPLEMENTATION_PLAN.md P0-3 for details
 
-    // M4 FIX: Pipeline starvation detection — check stream depths every 60s.
+    // M4 FIX: Pipeline starvation detection — check stream depths periodically.
     // Alerts when detectors are healthy but execution pipeline has been idle for 5+ minutes.
     this.intervalManager.set(
       'pipeline-starvation-check',
@@ -2101,7 +2134,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
           this.logger.debug('Pipeline starvation check failed (best-effort)', { error });
         }
       },
-      60_000
+      // P2-15 FIX: Configurable starvation check interval (default 60s).
+      safeParseInt(process.env.COORDINATOR_STARVATION_CHECK_INTERVAL_MS, 60_000)
     );
 
     // FIX P1: Use dedicated interval for cleanup operations
@@ -2122,13 +2156,17 @@ export class CoordinatorService implements CoordinatorStateProvider {
           this.logger.error('Cleanup operations failed', { error });
         }
       },
-      10000
+      // P2-15 FIX: Configurable cleanup interval (default 10s).
+      safeParseInt(process.env.COORDINATOR_CLEANUP_INTERVAL_MS, 10_000)
     );
   }
 
   /**
    * M4 FIX: Check for pipeline starvation — detectors healthy but no execution requests.
-   * Uses XLEN to check stream depths without blocking.
+   * P1-4 FIX: Uses checkStreamLag instead of XLEN. XLEN counts ALL entries including
+   * already-consumed ones that haven't been trimmed (approximate MAXLEN). This caused
+   * false "pipeline active" readings when the stream had entries but all were consumed.
+   * checkStreamLag.pendingCount reflects only unconsumed messages in the consumer group.
    */
   private async checkPipelineStarvation(): Promise<void> {
     if (!this.streamsClient) return;
@@ -2136,12 +2174,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // Skip during startup grace period
     if (Date.now() - this.startTime < CoordinatorService.STARTUP_GRACE_PERIOD_MS) return;
 
-    const executionRequestsLen = await this.streamsClient.xlen(
-      RedisStreamsClient.STREAMS.EXECUTION_REQUESTS
+    const lag = await this.streamsClient.checkStreamLag(
+      RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
+      this.config.consumerGroup,
     );
 
-    // If execution requests exist, pipeline is active
-    if (executionRequestsLen > 0) {
+    // If there are pending (unconsumed) messages, pipeline is active
+    if (lag.pendingCount > 0) {
       this.lastExecutionRequestTime = Date.now();
       this.pipelineStarvationAlerted = false;
       return;
@@ -2177,7 +2216,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
         data: {
           healthyDetectors: healthyDetectorNames,
           starvationDurationMs: starvationDuration,
-          executionRequestStreamLen: executionRequestsLen,
+          executionRequestStreamPending: lag.pendingCount,
         },
         timestamp: Date.now(),
       });
@@ -2291,7 +2330,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // Use AlertCooldownManager for cooldown check and recording
     // The manager handles delegation to HealthMonitor and automatic cleanup
     if (!this.alertCooldownManager?.shouldSendAndRecord(alertKey)) {
-      return; // Alert is on cooldown, skip
+      // P2-5 FIX: Log suppression at debug level for operational debugging.
+      // Previously zero logging — impossible to distinguish "condition didn't happen"
+      // from "suppressed by cooldown" during incident investigation.
+      this.logger.debug('Alert suppressed by cooldown', { alertKey, type: alert.type });
+      return;
     }
 
     // Log and send alert
@@ -2557,10 +2600,25 @@ export class CoordinatorService implements CoordinatorStateProvider {
   /**
    * H-01 FIX: Check Redis connectivity for readiness probe.
    * RedisClient.ping() already has a 2s internal timeout and returns boolean.
+   * P1-5 FIX: Also checks the dedicated opportunity streams client. If only
+   * the main client is healthy but the opp client is down, opportunity
+   * forwarding silently fails while health reports healthy.
    */
   async checkRedisConnectivity(): Promise<boolean> {
     if (!this.redis) return false;
-    return this.redis.ping();
+    const mainOk = await this.redis.ping();
+    if (!mainOk) return false;
+    // P1-5 FIX: Verify dedicated opportunity streams client if it exists.
+    // During startup or if ADR-037 is disabled, this client may not be created.
+    if (this.opportunityStreamsClient) {
+      try {
+        await this.opportunityStreamsClient.ping();
+      } catch {
+        this.logger.warn('Dedicated opportunity streams client health check failed');
+        return false;
+      }
+    }
+    return true;
   }
 
   // ===========================================================================
