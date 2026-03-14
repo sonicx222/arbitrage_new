@@ -788,23 +788,24 @@ Tracks which token pairs are currently generating opportunities across all parti
 - Pairs expire after TTL to prevent unbounded growth
 - Size-limited map with LRU eviction at max capacity
 
-**Stream Consumer Groups (9 Groups)**
+**Stream Consumer Groups (10 Streams, 1 Shared Group)**
 
-The coordinator subscribes to 9 Redis Streams consumer groups, one per stream topic:
+The coordinator subscribes to 10 Redis Streams using a single consumer group (`coordinator-group`) with the coordinator instance ID as the consumer name:
 
-| Consumer Group | Stream | Purpose |
-|----------------|--------|---------|
-| `coordinator-health` | `stream:health` | Service health heartbeats |
-| `coordinator-opportunities` | `stream:opportunities` | Opportunity intake and routing |
-| `coordinator-swap-events` | `stream:swap-events` | Swap event monitoring |
-| `coordinator-whale-alerts` | `stream:whale-alerts` | Large transaction alerts |
-| `coordinator-volume` | `stream:volume-aggregates` | Volume tracking |
-| `coordinator-prices` | `stream:price-updates` | Solana price feed integration (S3.3.5) |
-| `coordinator-exec-results` | `stream:execution-results` | Execution results for metrics (OP-10) |
-| `coordinator-dlq` | `stream:dead-letter-queue` | Dead-letter queue monitoring (ES-003) |
-| `coordinator-fwd-dlq` | `stream:forwarding-dlq` | Forwarding failure recovery (DF-004) |
+| Stream | Purpose | Start ID |
+|--------|---------|----------|
+| `stream:health` | Service health heartbeats | `$` (new only) |
+| `stream:opportunities` | Opportunity intake and routing | `$` (new only) |
+| `stream:whale-alerts` | Large transaction alerts | `$` (new only) |
+| `stream:swap-events` | Swap event monitoring | `$` (new only) |
+| `stream:volume-aggregates` | Volume tracking | `$` (new only) |
+| `stream:price-updates` | Price feed integration | `$` (new only) |
+| `stream:execution-results` | Execution results for metrics (OP-10) | `$` (new only) |
+| `stream:dead-letter-queue` | Dead-letter queue monitoring (ES-003) | `0` (from beginning) |
+| `stream:forwarding-dlq` | Forwarding failure recovery (DF-004) | `0` (from beginning) |
+| `stream:service-degradation` | Service degradation events (C-02) | `$` (new only) |
 
-Each consumer group uses a single consumer (the coordinator instance ID). This design ensures:
+Live streams use `startId: '$'` (only new messages) because stale data is dangerous for trading. DLQ streams use `startId: '0'` (from beginning) because dead-letter messages need triage. This design ensures:
 - No duplicate processing (one coordinator instance processes each message)
 - Leader-only forwarding (only the elected leader forwards to execution)
 - Independent rate limiting per stream via `StreamRateLimiter`
