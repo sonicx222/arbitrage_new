@@ -73,9 +73,12 @@ describe('CexFeedHealthTracker', () => {
     expect(snap.isDegraded).toBe(false);
   });
 
-  it('should remain DISCONNECTED if onDisconnected called without prior connect', () => {
+  it('should transition DISCONNECTED → RECONNECTING if onDisconnected called without prior connect', () => {
+    // RESILIENCE FIX (C6): When initial connect() fails, the WS client auto-reconnects.
+    // The health tracker should reflect this by moving to RECONNECTING, not staying DISCONNECTED.
     tracker.onDisconnected();
-    expect(tracker.getStatus()).toBe(CexFeedHealthStatus.DISCONNECTED);
+    expect(tracker.getStatus()).toBe(CexFeedHealthStatus.RECONNECTING);
+    expect(tracker.getDisconnectedSince()).not.toBeNull();
   });
 
   it('should set status to PASSIVE for passive/simulation mode', () => {

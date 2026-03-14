@@ -259,6 +259,26 @@ export class CexDexSpreadCalculator extends EventEmitter {
   }
 
   /**
+   * RESILIENCE FIX (C3): Get token IDs with stale CEX prices.
+   * A token's CEX price is stale if it's older than maxCexPriceAgeMs.
+   * Returns unique token IDs (not per-chain pairs).
+   */
+  getStaleCexTokens(): string[] {
+    const now = Date.now();
+    const staleTokens = new Set<string>();
+
+    for (const [key, pairState] of this.state) {
+      if (!pairState.cexPrice) continue;
+      if (now - pairState.cexPrice.timestamp > this.config.maxCexPriceAgeMs) {
+        const tokenId = key.split(':')[0];
+        staleTokens.add(tokenId);
+      }
+    }
+
+    return Array.from(staleTokens);
+  }
+
+  /**
    * Reset all tracked data.
    */
   reset(): void {
@@ -322,7 +342,10 @@ export class CexDexSpreadCalculator extends EventEmitter {
     // Trim old history entries (amortized cleanup).
     // History is chronological, so find the first entry within the window
     // and splice from the front — avoids allocating a new array via filter().
-    if (pairState.history.length > 500) {
+    // RESILIENCE FIX (C7): Lowered threshold from 500 to 100 to prevent
+    // unbounded growth per token-chain pair. At 1 update/sec per pair,
+    // 100 entries accumulate in <2 minutes — well within the 5-minute window.
+    if (pairState.history.length > 100) {
       const cutoff = now - this.config.historyWindowMs;
       let trimCount = 0;
       while (trimCount < pairState.history.length && pairState.history[trimCount].timestamp < cutoff) {

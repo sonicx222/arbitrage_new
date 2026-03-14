@@ -6,6 +6,7 @@
  *
  * State transitions:
  *   DISCONNECTED → CONNECTED (onConnected)
+ *   DISCONNECTED → RECONNECTING (onDisconnected — initial connect failed, WS auto-reconnecting)
  *   CONNECTED → RECONNECTING (onDisconnected)
  *   RECONNECTING → CONNECTED (onConnected)
  *   RECONNECTING → DEGRADED (onMaxReconnectFailed)
@@ -13,6 +14,7 @@
  *   any → PASSIVE (setPassiveMode — simulation/skipExternalConnection)
  *
  * @see ADR-036: CEX Price Signals
+ * @see ADR-043: Bulkhead Isolation & Health Watchdog
  * @module feeds
  */
 
@@ -45,10 +47,15 @@ export class CexFeedHealthTracker {
   }
 
   onDisconnected(): void {
-    if (this.status === CexFeedHealthStatus.CONNECTED) {
+    // RESILIENCE FIX (C6): Also transition from DISCONNECTED → RECONNECTING.
+    // When initial connect() fails, the WS client auto-reconnects in the background.
+    // Without this transition, the health tracker stays DISCONNECTED and never
+    // reaches DEGRADED even after maxReconnectFailed fires.
+    if (this.status === CexFeedHealthStatus.CONNECTED || this.status === CexFeedHealthStatus.DISCONNECTED) {
       this.status = CexFeedHealthStatus.RECONNECTING;
+      this._disconnectedSince = this._disconnectedSince ?? Date.now();
     }
-    // If already DISCONNECTED or DEGRADED, stay in current state
+    // If already RECONNECTING or DEGRADED, stay in current state
   }
 
   onMaxReconnectFailed(): void {

@@ -82,6 +82,8 @@ export interface CexFeedStats {
   activeAlertCount: number;
   /** Health status of the CEX feed connection */
   healthStatus: CexFeedHealthStatus;
+  /** Total trade processing errors caught by error boundary */
+  tradeErrorsTotal: number;
 }
 
 // =============================================================================
@@ -111,6 +113,7 @@ export class CexPriceFeedService extends EventEmitter {
   private _dexPriceUpdates = 0;
   private _spreadAlerts = 0;
   private _wsReconnections = 0;
+  private _tradeErrors = 0;
 
   constructor(config?: CexPriceFeedConfig) {
     super();
@@ -176,17 +179,27 @@ export class CexPriceFeedService extends EventEmitter {
       ...(this.config.maxReconnectAttempts !== undefined && { maxReconnectAttempts: this.config.maxReconnectAttempts }),
     });
 
-    // Wire trade events through normalizer into spread calculator
+    // Wire trade events through normalizer into spread calculator.
+    // RESILIENCE FIX (C2): Wrap in try/catch to prevent a single malformed trade
+    // or normalizer/spread-calculator error from crashing the process.
     this.wsClient.on('trade', (trade: BinanceTradeEvent) => {
-      this._cexPriceUpdates++;
-      this.emit('trade', trade);
-      const normalized = this.normalizer.normalize(trade);
-      if (normalized) {
-        this.spreadCalculator.updateCexPrice(
-          normalized.tokenId,
-          normalized.price,
-          normalized.timestamp,
-        );
+      try {
+        this._cexPriceUpdates++;
+        this.emit('trade', trade);
+        const normalized = this.normalizer.normalize(trade);
+        if (normalized) {
+          this.spreadCalculator.updateCexPrice(
+            normalized.tokenId,
+            normalized.price,
+            normalized.timestamp,
+          );
+        }
+      } catch (err) {
+        this._tradeErrors++;
+        logger.error('Error processing CEX trade event', {
+          error: (err as Error).message,
+          symbol: trade?.symbol,
+        });
       }
     });
 
@@ -326,7 +339,18 @@ export class CexPriceFeedService extends EventEmitter {
       simulationMode: this.config.simulateCexPrices ?? false,
       activeAlertCount: this.spreadCalculator.getActiveAlerts().length,
       healthStatus: this.healthTracker.getStatus(),
+      tradeErrorsTotal: this._tradeErrors,
     };
+  }
+
+  /**
+   * RESILIENCE FIX (C3): Get tokens with stale CEX prices.
+   * Returns token IDs whose CEX price is older than maxCexPriceAgeMs.
+   * Useful for per-token degradation — only distrust scoring for stale tokens
+   * instead of applying a global penalty to all chains.
+   */
+  getStaleCexTokens(): string[] {
+    return this.spreadCalculator.getStaleCexTokens();
   }
 
   /** Get health snapshot for monitoring integration. */
