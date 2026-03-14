@@ -300,7 +300,6 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private degradationLevel: DegradationLevel = DegradationLevel.FULL_OPERATION;
   // R2: Alert cooldown manager (encapsulates dual-storage pattern with HealthMonitor)
   private alertCooldownManager: AlertCooldownManager | null = null;
-  private opportunities: Map<string, ArbitrageOpportunity> = new Map();
   // FIX: Alert notifier for sending alerts to Discord/Slack
   private alertNotifier: AlertNotifier | null = null;
 
@@ -1014,7 +1013,6 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // Clear collections
       this.serviceHealth.clear();
       this.alertCooldownManager?.clear();
-      this.opportunities.clear();
       // FIX: Clear activePairs to prevent stale data on restart
       this.activePairsTracker?.clear();
       // R2 REFACTOR: Reset stream consumer manager state
@@ -2423,7 +2421,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
     this.healthMonitor!.updateMetrics(this.serviceHealth, this.systemMetrics);
 
     // Update pending opportunities count (from either opportunity router or local map)
-    this.systemMetrics.pendingOpportunities = this.opportunityRouter?.getPendingCount() ?? this.opportunities.size;
+    this.systemMetrics.pendingOpportunities = this.opportunityRouter?.getPendingCount() ?? 0;
 
     // FIX: Evaluate degradation level after updating metrics (ADR-007)
     this.evaluateDegradationLevel();
@@ -2626,7 +2624,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
    */
   getOpportunities(): ReadonlyMap<string, ArbitrageOpportunity> {
     // R2: Delegate to opportunity router if available
-    return this.opportunityRouter?.getOpportunities() ?? this.opportunities;
+    return this.opportunityRouter?.getOpportunities() ?? new Map();
   }
 
   /**
