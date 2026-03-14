@@ -29,6 +29,7 @@ interface RateLimitStore {
   resetAll?: () => Promise<void>;
   shutdown?: () => Promise<void>;
   localKeys?: boolean;
+  prefix?: string;
 }
 
 /**
@@ -41,7 +42,8 @@ export class RedisRateLimitStore implements RateLimitStore {
   private redis: Redis | null = null;
   private redisUrl: string;
   private windowMs = 60_000;
-  private prefix: string;
+  /** Public per express-rate-limit Store interface (used for double-count detection). */
+  prefix: string;
   private connected = false;
 
   /** False = keys are shared across instances (the whole point). */
