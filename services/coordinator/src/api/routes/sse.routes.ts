@@ -25,7 +25,10 @@ import { parseEnvIntSafe } from '@arbitrage/core/utils/env-utils';
 import { getStreamHealthMonitor, getDiagnosticsCollector } from '@arbitrage/core/monitoring';
 import { getCexPriceFeedService } from '@arbitrage/core/feeds';
 import { FEATURE_FLAGS } from '@arbitrage/config';
+import { createLogger } from '@arbitrage/core/logger';
 import type { CoordinatorStateProvider } from '../types';
+
+const logger = createLogger('sse-routes');
 
 // M-05 FIX: Configurable max SSE connections (default: 50, min: 1)
 const MAX_SSE_CONNECTIONS = parseEnvIntSafe('SSE_MAX_CONNECTIONS', 50, 1);
@@ -111,8 +114,8 @@ function startTimerPool(state: CoordinatorStateProvider): void {
         };
       }
       broadcast('streams', JSON.stringify(mapped));
-    } catch {
-      // Stream monitor not available yet — skip
+    } catch (err) {
+      logger.debug('Stream monitor not available yet', { error: (err as Error).message });
     }
   }, SSE_INTERVAL_STREAMS));
 
@@ -127,8 +130,8 @@ function startTimerPool(state: CoordinatorStateProvider): void {
       const collector = getDiagnosticsCollector();
       const snapshot = await collector.collect();
       broadcast('diagnostics', JSON.stringify(snapshot));
-    } catch {
-      // DiagnosticsCollector or underlying monitors not ready — skip
+    } catch (err) {
+      logger.debug('DiagnosticsCollector not ready', { error: (err as Error).message });
     }
   }, SSE_INTERVAL_DIAGNOSTICS));
 
@@ -147,8 +150,8 @@ function startTimerPool(state: CoordinatorStateProvider): void {
         alerts: cexFeed.getActiveAlerts(),
         healthSnapshot: cexFeed.getHealthSnapshot(),
       }));
-    } catch {
-      // CEX feed not initialized — skip
+    } catch (err) {
+      logger.debug('CEX feed not initialized', { error: (err as Error).message });
     }
   }, SSE_INTERVAL_CEX_SPREAD));
 
@@ -250,8 +253,8 @@ export function createSSERoutes(state: CoordinatorStateProvider): Router {
           alerts: cexFeed.getActiveAlerts(),
           healthSnapshot: cexFeed.getHealthSnapshot(),
         });
-      } catch {
-        // CEX feed not initialized — skip
+      } catch (err) {
+        logger.debug('CEX feed not initialized for new client', { error: (err as Error).message });
       }
     }
 

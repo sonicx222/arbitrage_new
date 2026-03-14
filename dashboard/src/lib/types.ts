@@ -50,6 +50,7 @@ export interface SystemMetrics {
     avgScoreAdmitted: number;
     avgScoreShed: number;
   };
+  notificationDroppedAlerts?: number;
 }
 
 export interface ServiceHealth {
