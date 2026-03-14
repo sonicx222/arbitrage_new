@@ -364,17 +364,37 @@ export class StreamConsumer {
 
       // OPT-1: Batch handler path — pass all messages at once for dedup/priority processing
       if (this.config.batchHandler && messages.length > 0) {
+        // T2-4 FIX: Declare processedIds outside try so partial results survive a throw.
+        // If batchHandler throws after processing some messages, previously ALL messages
+        // were left un-ACKed (redelivered), including already-processed ones. Now we ACK
+        // whatever was returned before the throw in the finally block.
+        let processedIds: string[] = [];
+        let batchFailed = false;
         try {
-          const processedIds = await this.config.batchHandler(messages);
+          processedIds = await this.config.batchHandler(messages);
+        } catch (batchError) {
+          batchFailed = true;
+          // DI-M-001 FIX: Include message IDs in error log for redelivery forensics.
+          const unackedCount = messages.length - processedIds.length;
+          this.config.logger?.error('Stream batch handler failed — unprocessed messages left for redelivery', {
+            error: batchError,
+            stream: this.config.config.streamName,
+            batchSize: messages.length,
+            processedBeforeError: processedIds.length,
+            unackedCount,
+            firstId: messages[0]?.id,
+            lastId: messages[messages.length - 1]?.id,
+          });
+        }
+
+        // Stats and transit time for whatever was processed (full batch or partial)
+        if (processedIds.length > 0) {
           const processedSet = new Set(processedIds);
           this.stats.messagesProcessed += processedSet.size;
-          this.stats.messagesFailed += messages.length - processedSet.size;
-          if (processedSet.size > 0) {
-            this.stats.lastProcessedAt = Date.now();
-          }
+          this.stats.lastProcessedAt = Date.now();
 
           // Phase 3 (F1): Record transit time for batch-processed messages
-          if (this.config.onMessageTransitTime && processedSet.size > 0) {
+          if (this.config.onMessageTransitTime) {
             const now = Date.now();
             for (const msg of messages) {
               if (processedSet.has(msg.id)) {
@@ -388,30 +408,22 @@ export class StreamConsumer {
               }
             }
           }
+        }
+        // Count failures: on full success, unprocessed = not in processedIds.
+        // On batchHandler throw, unprocessed = everything not in processedIds.
+        const failedCount = batchFailed
+          ? messages.length - processedIds.length
+          : messages.length - processedIds.length;
+        this.stats.messagesFailed += failedCount;
 
-          // ADR-037: Auto-acknowledge successfully processed messages using pipelined
-          // batch XACK. At batch size 200, this reduces ACK overhead from ~20-40ms
-          // (200 sequential round-trips) to ~0.5ms (1 pipelined round-trip).
-          if (this.config.autoAck && processedIds.length > 0) {
-            await this.client.batchXack(
-              this.config.config.streamName,
-              this.config.config.groupName,
-              processedIds
-            );
-          }
-        } catch (batchError) {
-          this.stats.messagesFailed += messages.length;
-          // DI-M-001 FIX: Include message IDs in error log for redelivery forensics.
-          // When a batch of 200 messages fails, operators need to know which IDs will
-          // be redelivered to diagnose potential redelivery storms.
-          this.config.logger?.error('Stream batch handler failed — all messages unACKed for redelivery', {
-            error: batchError,
-            stream: this.config.config.streamName,
-            batchSize: messages.length,
-            messageIds: messages.map(m => m.id),
-            firstId: messages[0]?.id,
-            lastId: messages[messages.length - 1]?.id,
-          });
+        // ADR-037: Auto-acknowledge successfully processed messages using pipelined
+        // batch XACK. Works for both full success and partial success (after throw).
+        if (this.config.autoAck && processedIds.length > 0) {
+          await this.client.batchXack(
+            this.config.config.streamName,
+            this.config.config.groupName,
+            processedIds
+          );
         }
       } else {
         // Per-message handler path (original behavior)

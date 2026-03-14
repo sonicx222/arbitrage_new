@@ -282,6 +282,9 @@ export class OpportunityRouter {
   private readonly streamsClient: OpportunityStreamsClient | null;
   private readonly circuitBreaker: CircuitBreaker;
   private readonly onAlert?: (alert: OpportunityAlert) => void;
+  // T2-3 FIX: Callback to persist CB state to Redis after state changes.
+  // The coordinator provides this so crash-restart cycles don't bypass CB protection.
+  private readonly onCircuitBreakerChange?: (status: { failures: number; isOpen: boolean; lastFailure: number }) => void;
 
   private readonly opportunities: Map<string, ArbitrageOpportunity> = new Map();
 
@@ -327,7 +330,8 @@ export class OpportunityRouter {
     circuitBreaker: CircuitBreaker,
     streamsClient?: OpportunityStreamsClient | null,
     config?: OpportunityRouterConfig,
-    onAlert?: (alert: OpportunityAlert) => void
+    onAlert?: (alert: OpportunityAlert) => void,
+    onCircuitBreakerChange?: (status: { failures: number; isOpen: boolean; lastFailure: number }) => void
   ) {
     this.logger = logger;
     this.circuitBreaker = circuitBreaker;
@@ -335,6 +339,7 @@ export class OpportunityRouter {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.effectiveMinProfitPercentage = this.config.minProfitPercentage;
     this.onAlert = onAlert;
+    this.onCircuitBreakerChange = onCircuitBreakerChange;
   }
 
   /**
@@ -1116,6 +1121,8 @@ export class OpportunityRouter {
         const justRecovered = this.circuitBreaker.recordSuccess();
         if (justRecovered) {
           this.logger.info('Execution circuit breaker closed - recovered');
+          // T2-3 FIX: Persist CB state to Redis on recovery
+          this.persistCircuitBreakerState();
         }
 
         // ADR-037: Downgraded from info to debug — at peak throughput, two info logs
@@ -1143,6 +1150,9 @@ export class OpportunityRouter {
             failures: status.failures,
             resetTimeoutMs: status.resetTimeoutMs,
           });
+
+          // T2-3 FIX: Persist CB state to Redis when circuit opens
+          this.persistCircuitBreakerState();
 
           this.onAlert?.({
             type: 'EXECUTION_CIRCUIT_OPEN',
@@ -1205,6 +1215,26 @@ export class OpportunityRouter {
         },
         timestamp: Date.now(),
       });
+    }
+  }
+
+  /**
+   * T2-3 FIX: Persist circuit breaker state to Redis via callback.
+   * Fire-and-forget — CB state is best-effort persistence. A failed persist
+   * means the next restart might miss 1 state change, which is acceptable
+   * since the CB will re-open quickly if the underlying issue persists.
+   */
+  private persistCircuitBreakerState(): void {
+    if (!this.onCircuitBreakerChange) return;
+    const status = this.circuitBreaker.getStatus();
+    try {
+      this.onCircuitBreakerChange({
+        failures: status.failures,
+        isOpen: status.isOpen,
+        lastFailure: (status as { lastFailure?: number }).lastFailure ?? 0,
+      });
+    } catch {
+      this.logger.debug('Failed to persist CB state (non-fatal)');
     }
   }
 

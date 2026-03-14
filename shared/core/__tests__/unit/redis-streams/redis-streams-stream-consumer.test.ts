@@ -603,6 +603,136 @@ describe('StreamConsumer', () => {
     });
   });
 
+  // ===========================================================================
+  // T2-4: Batch handler partial ACK
+  // ===========================================================================
+
+  describe('Batch Handler partial ACK (T2-4)', () => {
+    // Use direct mock client pattern (like stream-consumer-nogroup.test.ts)
+    // because batchHandler needs batchXack on the client.
+    const createBatchMockClient = () => ({
+      xreadgroup: jest.fn<() => Promise<any>>(),
+      xack: jest.fn<() => Promise<number>>().mockResolvedValue(1),
+      batchXack: jest.fn<() => Promise<number>>().mockResolvedValue(1),
+      createConsumerGroup: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      xpendingRange: jest.fn<() => Promise<any[]>>().mockResolvedValue([]),
+      xaddWithLimit: jest.fn<() => Promise<string>>().mockResolvedValue('1-0'),
+    });
+
+    const batchLogger = () => ({
+      error: jest.fn<(msg: string, ctx?: Record<string, unknown>) => void>(),
+      warn: jest.fn<(msg: string, ctx?: Record<string, unknown>) => void>(),
+      info: jest.fn<(msg: string, ctx?: Record<string, unknown>) => void>(),
+      debug: jest.fn<(msg: string, ctx?: Record<string, unknown>) => void>(),
+    });
+
+    async function awaitBatchPoll(consumer: any): Promise<void> {
+      await consumer.pollPromise;
+    }
+
+    it('should ACK only returned IDs when batchHandler returns partial results', async () => {
+      const bClient = createBatchMockClient();
+      const bLog = batchLogger();
+      const batchHandler = jest.fn<() => Promise<string[]>>();
+
+      // 3 messages arrive, handler only returns first 2 IDs (partial success)
+      bClient.xreadgroup
+        .mockResolvedValueOnce([
+          { id: '100-0', data: { type: 'test' } },
+          { id: '100-1', data: { type: 'test' } },
+          { id: '100-2', data: { type: 'test' } },
+        ])
+        .mockResolvedValue([]);
+      batchHandler.mockResolvedValueOnce(['100-0', '100-1']);
+
+      const consumer = new StreamConsumer(bClient as any, {
+        config: { streamName: 'stream:test', groupName: 'grp', consumerName: 'c1' },
+        batchHandler,
+        autoAck: true,
+        blockMs: 0,
+        logger: bLog,
+      });
+
+      consumer.start();
+      await awaitBatchPoll(consumer);
+      await consumer.stop();
+
+      // Only the 2 returned IDs should be ACKed
+      expect(bClient.batchXack).toHaveBeenCalledWith('stream:test', 'grp', ['100-0', '100-1']);
+      const stats = consumer.getStats();
+      expect(stats.messagesProcessed).toBe(2);
+      expect(stats.messagesFailed).toBe(1);
+    });
+
+    it('should not call batchXack when batchHandler throws (no partial results)', async () => {
+      const bClient = createBatchMockClient();
+      const bLog = batchLogger();
+      const batchHandler = jest.fn<() => Promise<string[]>>();
+
+      bClient.xreadgroup
+        .mockResolvedValueOnce([
+          { id: '200-0', data: { type: 'test' } },
+          { id: '200-1', data: { type: 'test' } },
+        ])
+        .mockResolvedValue([]);
+      batchHandler.mockRejectedValueOnce(new Error('Handler crashed'));
+
+      const consumer = new StreamConsumer(bClient as any, {
+        config: { streamName: 'stream:test', groupName: 'grp', consumerName: 'c1' },
+        batchHandler,
+        autoAck: true,
+        blockMs: 0,
+        logger: bLog,
+      });
+
+      consumer.start();
+      await awaitBatchPoll(consumer);
+      await consumer.stop();
+
+      // No IDs to ACK — handler threw before returning
+      expect(bClient.batchXack).not.toHaveBeenCalled();
+      const stats = consumer.getStats();
+      expect(stats.messagesProcessed).toBe(0);
+      expect(stats.messagesFailed).toBe(2);
+      // Error should be logged with batch context
+      expect(bLog.error).toHaveBeenCalledWith(
+        expect.stringContaining('batch handler failed'),
+        expect.objectContaining({ batchSize: 2 }),
+      );
+    });
+
+    it('should ACK all IDs when batchHandler returns all results', async () => {
+      const bClient = createBatchMockClient();
+      const bLog = batchLogger();
+      const batchHandler = jest.fn<() => Promise<string[]>>();
+
+      bClient.xreadgroup
+        .mockResolvedValueOnce([
+          { id: '300-0', data: { type: 'test' } },
+          { id: '300-1', data: { type: 'test' } },
+        ])
+        .mockResolvedValue([]);
+      batchHandler.mockResolvedValueOnce(['300-0', '300-1']);
+
+      const consumer = new StreamConsumer(bClient as any, {
+        config: { streamName: 'stream:test', groupName: 'grp', consumerName: 'c1' },
+        batchHandler,
+        autoAck: true,
+        blockMs: 0,
+        logger: bLog,
+      });
+
+      consumer.start();
+      await awaitBatchPoll(consumer);
+      await consumer.stop();
+
+      expect(bClient.batchXack).toHaveBeenCalledWith('stream:test', 'grp', ['300-0', '300-1']);
+      const stats = consumer.getStats();
+      expect(stats.messagesProcessed).toBe(2);
+      expect(stats.messagesFailed).toBe(0);
+    });
+  });
+
   describe('Error Handling', () => {
     it('should continue polling after stream read error', async () => {
       const handler = createMockHandler().mockResolvedValue(undefined);

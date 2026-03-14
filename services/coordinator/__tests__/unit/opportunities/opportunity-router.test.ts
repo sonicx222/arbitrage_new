@@ -813,6 +813,103 @@ describe('OpportunityRouter', () => {
   });
 
   // ===========================================================================
+  // T2-3: Circuit Breaker State Persistence Callback
+  // ===========================================================================
+
+  describe('circuit breaker state persistence (T2-3)', () => {
+    it('should call onCircuitBreakerChange when circuit opens', async () => {
+      streamsClient.xaddWithLimit.mockImplementation(async (stream: string) => {
+        if (stream === 'stream:execution-requests') throw new Error('Redis down');
+        return 'dlq-id';
+      });
+      circuitBreaker.recordFailure.mockReturnValueOnce(true); // circuit just opened
+      circuitBreaker.getStatus.mockReturnValue({
+        isOpen: true, failures: 5, resetTimeoutMs: 60000, lastFailure: Date.now(), threshold: 5,
+      });
+
+      const cbCallback = jest.fn();
+      const routerWithCb = new OpportunityRouter(
+        logger, circuitBreaker, streamsClient,
+        { maxRetries: 3, retryBaseDelayMs: 1, instanceId: 'test', startupGracePeriodMs: 0 },
+        undefined,
+        cbCallback,
+      );
+
+      await routerWithCb.forwardToExecutionEngine(createOpportunity({ id: 'opp-cb-open' }));
+
+      expect(cbCallback).toHaveBeenCalledTimes(1);
+      expect(cbCallback).toHaveBeenCalledWith(expect.objectContaining({
+        isOpen: true,
+        failures: 5,
+      }));
+    });
+
+    it('should call onCircuitBreakerChange when circuit recovers', async () => {
+      streamsClient.xaddWithLimit.mockResolvedValue('msg-id');
+      circuitBreaker.recordSuccess.mockReturnValueOnce(true); // circuit just recovered
+      circuitBreaker.getStatus.mockReturnValue({
+        isOpen: false, failures: 0, resetTimeoutMs: 60000, lastFailure: 0, threshold: 5,
+      });
+
+      const cbCallback = jest.fn();
+      const routerWithCb = new OpportunityRouter(
+        logger, circuitBreaker, streamsClient,
+        { maxRetries: 3, retryBaseDelayMs: 1, instanceId: 'test', startupGracePeriodMs: 0 },
+        undefined,
+        cbCallback,
+      );
+
+      await routerWithCb.forwardToExecutionEngine(createOpportunity({ id: 'opp-cb-recover' }));
+
+      expect(cbCallback).toHaveBeenCalledTimes(1);
+      expect(cbCallback).toHaveBeenCalledWith(expect.objectContaining({
+        isOpen: false,
+        failures: 0,
+      }));
+    });
+
+    it('should not call onCircuitBreakerChange on normal success (no state transition)', async () => {
+      streamsClient.xaddWithLimit.mockResolvedValue('msg-id');
+      circuitBreaker.recordSuccess.mockReturnValueOnce(false); // no transition
+
+      const cbCallback = jest.fn();
+      const routerWithCb = new OpportunityRouter(
+        logger, circuitBreaker, streamsClient,
+        { maxRetries: 3, retryBaseDelayMs: 1, instanceId: 'test', startupGracePeriodMs: 0 },
+        undefined,
+        cbCallback,
+      );
+
+      await routerWithCb.forwardToExecutionEngine(createOpportunity({ id: 'opp-cb-normal' }));
+
+      expect(cbCallback).not.toHaveBeenCalled();
+    });
+
+    it('should swallow errors from onCircuitBreakerChange callback', async () => {
+      streamsClient.xaddWithLimit.mockResolvedValue('msg-id');
+      circuitBreaker.recordSuccess.mockReturnValueOnce(true); // triggers callback
+      circuitBreaker.getStatus.mockReturnValue({
+        isOpen: false, failures: 0, resetTimeoutMs: 60000, lastFailure: 0, threshold: 5,
+      });
+
+      const cbCallback = jest.fn().mockImplementation(() => { throw new Error('Redis write failed'); });
+      const routerWithCb = new OpportunityRouter(
+        logger, circuitBreaker, streamsClient,
+        { maxRetries: 3, retryBaseDelayMs: 1, instanceId: 'test', startupGracePeriodMs: 0 },
+        undefined,
+        cbCallback,
+      );
+
+      // Should NOT throw despite callback error
+      await expect(
+        routerWithCb.forwardToExecutionEngine(createOpportunity({ id: 'opp-cb-error' }))
+      ).resolves.toBeUndefined();
+
+      expect(cbCallback).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ===========================================================================
   // Dead Letter Queue
   // ===========================================================================
 

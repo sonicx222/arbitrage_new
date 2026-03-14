@@ -747,7 +747,14 @@ export class CoordinatorService implements CoordinatorStateProvider {
           severity: alert.severity,
           data: alert.data,
           timestamp: alert.timestamp,
-        })
+        }),
+        // T2-3 FIX: Persist CB state to Redis on open/close transitions.
+        // Uses fire-and-forget set with 5-min TTL — if coordinator is down
+        // for >5min the CB state expires and starts fresh (acceptable).
+        (status) => {
+          this.redis?.set('coordinator:cb:execution', status, 300)
+            .catch(() => { /* best-effort persist */ });
+        }
       );
 
       // ADR-036: Start CEX price feed if feature flag is enabled
