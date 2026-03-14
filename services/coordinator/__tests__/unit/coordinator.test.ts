@@ -171,6 +171,57 @@ jest.mock('@arbitrage/core', () => ({
   findKSmallest: jest.fn(<T>(iter: Iterable<T>, k: number) => Array.from(iter).slice(0, k))
 }));
 
+// FIX: Re-apply mock implementations before each test.
+// jest.config.base.js has `resetMocks: true` which clears all mockImplementation()
+// calls between tests, causing the jest.mock() factory-provided implementations
+// to return undefined after the first test in each describe block.
+const coreMocks = jest.requireMock('@arbitrage/core') as Record<string, jest.Mock>;
+
+beforeEach(() => {
+  coreMocks.createLogger.mockReturnValue({
+    info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn(),
+  });
+  coreMocks.getPerformanceLogger.mockReturnValue({
+    startTimer: jest.fn(() => ({ stop: jest.fn() })),
+    recordMetric: jest.fn(), logEventLatency: jest.fn(), logHealthCheck: jest.fn(),
+  });
+  coreMocks.createServiceState.mockReturnValue({
+    getState: jest.fn(() => 'stopped'),
+    isRunning: jest.fn(() => false),
+    isStopped: jest.fn(() => true),
+    executeStart: jest.fn(async (fn: () => Promise<void>) => { await fn(); return { success: true, currentState: 'running' }; }),
+    executeStop: jest.fn(async (fn: () => Promise<void>) => { await fn(); return { success: true, currentState: 'stopped' }; }),
+    on: jest.fn(),
+    removeAllListeners: jest.fn(),
+  });
+  coreMocks.SimpleCircuitBreaker.mockReturnValue({
+    isCurrentlyOpen: jest.fn(() => false),
+    recordFailure: jest.fn(() => false),
+    recordSuccess: jest.fn(() => false),
+    getFailures: jest.fn(() => 0),
+    getStatus: jest.fn(() => ({ isOpen: false, failures: 0, resetTimeoutMs: 60000, lastFailure: 0, threshold: 5 })),
+    getCooldownRemaining: jest.fn(() => 0),
+  });
+  coreMocks.getStreamHealthMonitor.mockReturnValue({
+    setConsumerGroup: jest.fn(), start: jest.fn(), stop: jest.fn(),
+  });
+  coreMocks.StreamConsumer.mockImplementation((_client: unknown, config: { handler?: (msg: unknown) => Promise<void> }) => {
+    const stats = { messagesProcessed: 0, messagesFailed: 0, lastProcessedAt: null as number | null, isRunning: false, isPaused: false };
+    return {
+      start: jest.fn(() => { stats.isRunning = true; }),
+      stop: jest.fn(async () => { stats.isRunning = false; }),
+      getStats: jest.fn(() => ({ ...stats })),
+      pause: jest.fn(() => { stats.isPaused = true; }),
+      resume: jest.fn(() => { stats.isPaused = false; }),
+      _simulateMessage: async (msg: unknown) => {
+        if (config?.handler) {
+          try { await config.handler(msg); stats.messagesProcessed++; stats.lastProcessedAt = Date.now(); } catch { stats.messagesFailed++; }
+        }
+      },
+    };
+  });
+});
+
 // Import config
 import { CHAINS } from '@arbitrage/config';
 
