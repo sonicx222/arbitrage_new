@@ -109,22 +109,22 @@ Misaligned configs that silently degrade functionality.
 
 ### Tier 5: Operational Quality (14 items)
 
-| ID | Source | Description | Files |
-|----|--------|-------------|-------|
-| T5-1 | ExtSvc #9 | `SWAP_DEADLINE_SECONDS` is global 300s — excessive MEV exposure on fast L2s | `shared/core/src/strategies/base.strategy.ts:147` |
-| T5-2 | ExtSvc #11 | Partition `/ready` doesn't check Redis connectivity — reports "ready" when Redis down | `shared/core/src/partition/health-server.ts:350-363` |
-| T5-3 | ExtSvc #14 | No publish-side schema validation for opportunities | `shared/core/src/redis/opportunity-publisher.ts:106` |
-| T5-4 | ExtSvc #16 | No chain coverage health alert when partition failure leaves chains unmonitored | `services/coordinator/src/` |
-| T5-5 | ExtSvc #22 | Bridge-latency-adjusted timeout for cross-chain opportunities | `shared/config/src/thresholds.ts:84-105` |
-| T5-6 | ExtSvc #23 | StreamBatcher `maxWaitMs=10ms` is global — fast L2s need 3ms | `shared/core/src/redis/streams.ts:259-263` |
-| T5-7 | Services BUG-P2-4 | `cbReenqueueCounts` FIFO eviction deletes 20% — may reset active counts | `services/execution-engine/src/execution-pipeline.ts:233-240` |
-| T5-8 | Services REF-02 | Consumer lag detection logic copy-pasted (23 lines) between single/batch handlers | `services/coordinator/src/coordinator.ts:1555,1723` |
-| T5-9 | Profitability | PnL/drawdown tracker uses raw native wei — no USD normalization via `getNativeTokenPrice()` | `shared/core/src/risk/drawdown-tracker.ts` |
-| T5-10 | Profitability | Alertmanager routing commented out — no live alerting in any mode | `infrastructure/monitoring/alert-rules.yml:327-364` |
-| T5-11 | Profitability | Grafana dashboards exist but not auto-provisioned | `infrastructure/monitoring/grafana/` |
-| T5-12 | Profitability | Slippage metric not split into estimation error vs execution slippage | `services/execution-engine/src/` |
-| T5-13 | CC M-10 | 8+ env vars missing from `.env.example` (LOG_*, FLASH_LOAN_CONTRACT_*) | `.env.example` |
-| T5-14 | Profitability | Linea flash loans blocked — no SyncSwap vault address configured | `shared/config/src/flash-loan-providers/` |
+| ID | Source | Description | Status |
+|----|--------|-------------|--------|
+| ~~T5-1~~ | ExtSvc #9 | `SWAP_DEADLINE_SECONDS` is global 300s — excessive MEV exposure on fast L2s | **ALREADY FIXED** (`getSwapDeadlineSeconds()` per-chain in thresholds.ts) |
+| ~~T5-2~~ | ExtSvc #11 | Partition `/ready` doesn't check Redis connectivity — reports "ready" when Redis down | **ALREADY FIXED** (Redis ping in health-server.ts:351-378) |
+| ~~T5-3~~ | ExtSvc #14 | No publish-side schema validation for opportunities | **NON-ISSUE** (consumer validates; publisher checks id/chain/type — adding full schema on hot path adds latency) |
+| T5-4 | ExtSvc #16 | No chain coverage health alert when partition failure leaves chains unmonitored | Open (moderate scope — coordinator feature) |
+| T5-5 | ExtSvc #22 | Bridge-latency-adjusted timeout for cross-chain opportunities | Open (needs bridge latency data collection) |
+| T5-6 | ExtSvc #23 | StreamBatcher `maxWaitMs=10ms` is global — fast L2s need 3ms | Open (per-chain batcher config) |
+| ~~T5-7~~ | Services BUG-P2-4 | `cbReenqueueCounts` FIFO eviction deletes 20% — may reset active counts | **FIXED** (two-phase targeted eviction: completed entries first, then oldest) |
+| T5-8 | Services REF-02 | Consumer lag detection logic copy-pasted (23 lines) between single/batch handlers | Open (refactor — extract helper) |
+| T5-9 | Profitability | PnL/drawdown tracker uses raw native wei — no USD normalization via `getNativeTokenPrice()` | Open (interface change — `TradeResult.pnl` is `bigint` wei) |
+| ~~T5-10~~ | Profitability | Alertmanager routing commented out — no live alerting in any mode | **NON-ISSUE** (comment block is documentation example; system uses Redis Streams alerts) |
+| T5-11 | Profitability | Grafana dashboards exist but not auto-provisioned | Open (infrastructure — provisioning config) |
+| T5-12 | Profitability | Slippage metric not split into estimation error vs execution slippage | Open (feature — needs execution result comparison) |
+| ~~T5-13~~ | CC M-10 | 8+ env vars missing from `.env.example` (LOG_*, FLASH_LOAN_CONTRACT_*) | **ALREADY FIXED** (env vars present in `.env.example`) |
+| ~~T5-14~~ | Profitability | Linea flash loans blocked — no SyncSwap vault address configured | **KNOWN DEFERRED** (no SyncSwap vault on Linea mainnet) |
 
 ### Tier 6: Architecture / Refactoring (4 items)
 

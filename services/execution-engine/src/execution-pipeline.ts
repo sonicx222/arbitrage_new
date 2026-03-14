@@ -229,12 +229,19 @@ export class ExecutionPipeline {
             this.deps.stats.circuitBreakerBlocks++;
           } else {
             this.cbReenqueueCounts.set(opportunity.id, reenqueueCount);
-            // Evict oldest entries if map grows beyond limit (FIFO via insertion order)
+            // T5-7 FIX: Evict completed entries first, then oldest. Previously batch-evicted
+            // 20% which could reset active counts and bypass MAX_CB_REENQUEUE_ATTEMPTS.
             if (this.cbReenqueueCounts.size > ExecutionPipeline.MAX_CB_REENQUEUE_MAP_SIZE) {
-              const iter = this.cbReenqueueCounts.keys();
-              const toRemove = Math.floor(ExecutionPipeline.MAX_CB_REENQUEUE_MAP_SIZE * 0.2);
-              for (let i = 0; i < toRemove; i++) {
-                const key = iter.next().value;
+              // Phase 1: Evict entries at max attempts (already dropped, safe to remove)
+              for (const [key, count] of this.cbReenqueueCounts) {
+                if (count >= ExecutionPipeline.MAX_CB_REENQUEUE_ATTEMPTS) {
+                  this.cbReenqueueCounts.delete(key);
+                }
+                if (this.cbReenqueueCounts.size <= ExecutionPipeline.MAX_CB_REENQUEUE_MAP_SIZE) break;
+              }
+              // Phase 2: If still over limit, evict oldest (lowest-count first is safest)
+              if (this.cbReenqueueCounts.size > ExecutionPipeline.MAX_CB_REENQUEUE_MAP_SIZE) {
+                const key = this.cbReenqueueCounts.keys().next().value;
                 if (key !== undefined) this.cbReenqueueCounts.delete(key);
               }
             }
