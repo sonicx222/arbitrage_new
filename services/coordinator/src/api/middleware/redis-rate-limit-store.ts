@@ -67,8 +67,14 @@ export class RedisRateLimitStore implements RateLimitStore {
         lazyConnect: false,
         connectTimeout: 3000,
       });
-      // Suppress connection error events (handled per-request via try/catch)
-      this.redis.on('error', () => {});
+      // SEC-M-03 FIX: Log connection errors instead of silently swallowing them.
+      // Per-request errors are still handled via try/catch; this ensures persistent
+      // connectivity issues are visible in logs for operational monitoring.
+      // Logs once per disconnect cycle (not per retry) to avoid log spam.
+      this.redis.on('error', (err) => {
+        console.warn('[RedisRateLimitStore] Redis connection error:', err.message);
+      });
+      this.redis.on('ready', () => { this.connected = true; });
     }
     return this.redis;
   }

@@ -58,10 +58,18 @@ const clients = new Set<SSEClient>();
 /** Shared timer handles (created on first connection, cleared when last disconnects) */
 let sharedTimers: NodeJS.Timeout[] | null = null;
 
-/** Send a pre-serialized SSE frame to a single client */
-function sendRaw(client: SSEClient, event: string, serialized: string): void {
-  client.messageId++;
-  client.res.write(`id: ${client.messageId}\nevent: ${event}\ndata: ${serialized}\n\n`);
+/** Send a pre-serialized SSE frame to a single client.
+ * BUG-H-01 FIX: try-catch prevents ERR_STREAM_DESTROYED from crashing broadcast loop. */
+function sendRaw(client: SSEClient, event: string, serialized: string): boolean {
+  try {
+    client.messageId++;
+    client.res.write(`id: ${client.messageId}\nevent: ${event}\ndata: ${serialized}\n\n`);
+    return true;
+  } catch {
+    // Client socket destroyed before close event fired — remove from set
+    clients.delete(client);
+    return false;
+  }
 }
 
 /** Broadcast a pre-serialized SSE frame to all connected clients */
@@ -157,7 +165,11 @@ function startTimerPool(state: CoordinatorStateProvider): void {
 
   timers.push(setInterval(() => {
     for (const client of clients) {
-      client.res.write(': keepalive\n\n');
+      try {
+        client.res.write(': keepalive\n\n');
+      } catch {
+        clients.delete(client);
+      }
     }
   }, SSE_INTERVAL_KEEPALIVE));
 
@@ -176,6 +188,19 @@ function stopTimerPool(): void {
 // L-12 FIX: Expose active SSE connection count for Prometheus gauge
 export function getActiveSSEConnections(): number {
   return clients.size;
+}
+
+/**
+ * BUG-H-02 FIX: Explicitly clean up SSE timers and disconnect all clients.
+ * Called from coordinator stop() before server.close() to ensure timers are
+ * cleared even if req.on('close') handlers don't fire during force-shutdown.
+ */
+export function shutdownSSE(): void {
+  stopTimerPool();
+  for (const client of clients) {
+    client.unsubscribe();
+  }
+  clients.clear();
 }
 
 // =============================================================================

@@ -599,12 +599,12 @@ describe('SSE Routes', () => {
       // Make res.write throw (simulates broken pipe / client disconnect before close event)
       (res.write as jest.Mock).mockImplementation(() => { throw new Error('write EPIPE'); });
 
-      // Push an event through the subscription — this will throw inside the SSE send()
-      expect(() => capturedListener!('test-event', { data: 'test' })).toThrow('write EPIPE');
+      // BUG-H-01 FIX: sendRaw now catches write errors instead of propagating them.
+      // The client is automatically removed from the clients set on error.
+      expect(() => capturedListener!('test-event', { data: 'test' })).not.toThrow();
 
-      // Despite the error, cleanup via close event should still work
-      // (res.write mock restored for cleanup verification isn't needed — we just verify
-      // that close event properly calls unsubscribe and decrements counter)
+      // The errored client was auto-removed by sendRaw's try-catch, so close event
+      // cleanup still works without issues (no-op if already removed).
       req.emit('close');
 
       // Counter should be back to 0: a new connection should succeed

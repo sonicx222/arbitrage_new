@@ -375,9 +375,12 @@ export async function handleDlqMessage(
     const opportunityId = getString(rawData, 'id', '') || getString(rawData, 'opportunityId', '');
 
     const classification = classifyDlqError(errorCode);
-    const dlq = deps.systemMetrics.dlqMetrics!;
-    dlq.total++;
-    dlq[classification]++;
+    // BUG-M-02 FIX: Guard against null dlqMetrics (metrics object may not be initialized yet)
+    const dlq = deps.systemMetrics.dlqMetrics;
+    if (dlq) {
+      dlq.total++;
+      dlq[classification]++;
+    }
 
     deps.logger.warn('DLQ entry classified', {
       messageId: message.id,

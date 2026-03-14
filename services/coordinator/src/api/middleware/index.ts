@@ -25,6 +25,16 @@ import { RedisRateLimitStore } from './redis-rate-limit-store';
  * @throws Error if in production without ALLOWED_ORIGINS configured
  */
 export function configureMiddleware(app: Application, logger: MinimalLogger): void {
+  // SEC-H-01 FIX: Configure trust proxy so express-rate-limit uses X-Forwarded-For
+  // instead of socket IP. Without this, all clients behind a reverse proxy (Fly.io,
+  // nginx) share one rate-limit bucket. Configurable via TRUST_PROXY env var.
+  const trustProxy = process.env.TRUST_PROXY;
+  if (trustProxy) {
+    // Support numeric hop count (e.g., "1") or string values (e.g., "loopback")
+    const numeric = parseInt(trustProxy, 10);
+    app.set('trust proxy', isNaN(numeric) ? trustProxy : numeric);
+  }
+
   // S-12 FIX: Prevent localhost CORS defaults in production
   if (process.env.NODE_ENV === 'production' && !process.env.ALLOWED_ORIGINS) {
     throw new Error(

@@ -70,6 +70,9 @@ function testChainGroupResolver(chainId: string): string {
     base: 'stream:exec-requests-l2',
     scroll: 'stream:exec-requests-l2',
     blast: 'stream:exec-requests-l2',
+    // MF-M-01 FIX: Add mantle/mode — they belong to l2-turbo partition per ADR-003/config
+    mantle: 'stream:exec-requests-l2',
+    mode: 'stream:exec-requests-l2',
     ethereum: 'stream:exec-requests-premium',
     zksync: 'stream:exec-requests-premium',
     linea: 'stream:exec-requests-premium',
@@ -391,8 +394,9 @@ describe('OpportunityRouter — coordinator wiring (getStreamForChain resolver)'
       chainGroupStreamResolver: testChainGroupResolver,
     });
 
-    // 'mantle' is not assigned to any group — resolver returns legacy stream
-    const opp = buildOpportunity({ chain: 'mantle', type: 'intra-chain' });
+    // MF-M-01 FIX: Use a canonical chain not in the group resolver (not mantle, which is in l2 group).
+    // 'sepolia' is canonical but has no group mapping — resolver returns legacy stream.
+    const opp = buildOpportunity({ chain: 'sepolia', type: 'intra-chain' });
     await router.processOpportunity(opp as unknown as Record<string, unknown>, true);
 
     expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(

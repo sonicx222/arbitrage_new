@@ -502,8 +502,9 @@ describe('CoordinatorService Integration', () => {
       // Spy on real client and make it fail
       jest.spyOn(streamsClient, 'createConsumerGroup').mockRejectedValue(new Error('Group creation failed'));
 
-      // Should not throw
-      await expect(coordinator.start(0)).resolves.not.toThrow();
+      // BUG-H-03 FIX: When ALL consumer groups fail, coordinator now throws
+      // (instead of process.exit) to allow graceful shutdown.
+      await expect(coordinator.start(0)).rejects.toThrow('consumer groups failed to create');
     });
 
     it('should handle malformed stream messages gracefully', async () => {

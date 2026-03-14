@@ -59,6 +59,8 @@ import {
   Logger,
   Alert
 } from './api';
+// BUG-H-02 FIX: Import SSE cleanup for use in stop()
+import { shutdownSSE } from './api/routes/sse.routes';
 
 // Import alert notification system
 import { AlertNotifier, AlertCooldownManager } from './alerts';
@@ -987,6 +989,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
         await this.leadershipElection.stop();
       }
 
+      // BUG-H-02 FIX: Clean up SSE timers and clients BEFORE closing the server.
+      // Without this, removeAllListeners() strips req.on('close') handlers,
+      // preventing stopTimerPool() from firing when the server force-closes.
+      shutdownSSE();
+
       // Close HTTP server gracefully
       if (this.server) {
         // P2 FIX: Capture server reference to satisfy TypeScript null check
@@ -1148,12 +1155,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.logger.warn(message, { successCount, failureCount });
       // If ALL consumer groups failed, the coordinator is non-functional
       if (successCount === 0 && failureCount > 0) {
-        this.logger.error('CRITICAL: All consumer groups failed - coordinator cannot consume streams. Exiting for orchestrator restart.', {
+        this.logger.error('CRITICAL: All consumer groups failed - coordinator cannot consume streams', {
           failureCount,
         });
-        // M-04 FIX: Exit instead of running as non-functional zombie.
-        // Orchestrator (Fly.io/Docker) will restart the process.
-        process.exit(1);
+        // BUG-H-03 FIX: Throw instead of process.exit(1) so stop() runs graceful
+        // shutdown (timer cleanup, SSE disconnect, Redis disconnect). The orchestrator
+        // (Fly.io/Docker) still restarts the process when it exits after cleanup.
+        throw new Error(`All ${failureCount} consumer groups failed to create — coordinator cannot function`);
       }
     }
 
@@ -1363,7 +1371,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
           error: (msg, ctx) => {
             this.logger.error(msg, ctx);
             // R2 REFACTOR: Use StreamConsumerManager for error tracking
-            this.streamConsumerManager!.trackError(groupConfig.streamName);
+            // BUG-L-01 FIX: Use optional chaining — manager is null before start()
+            this.streamConsumerManager?.trackError(groupConfig.streamName);
           },
           debug: (msg, ctx) => this.logger.debug(msg, ctx)
         }
@@ -1927,8 +1936,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * Kept as method for backward compatibility with integration tests.
    */
   private cleanupActivePairs(): void {
-    this.activePairsTracker!.cleanup();
-    this.systemMetrics.activePairsTracked = this.activePairsTracker!.size;
+    // BUG-M-01 FIX: Use optional chaining — tracker is null before start() completes
+    this.activePairsTracker?.cleanup();
+    this.systemMetrics.activePairsTracked = this.activePairsTracker?.size ?? 0;
   }
 
   /**
@@ -1936,8 +1946,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * Kept as method for backward compatibility with startStreamConsumers handler map.
    */
   private trackActivePair(pairKey: string, chain: string, dex: string): void {
-    this.activePairsTracker!.trackPair(pairKey, chain, dex);
-    this.systemMetrics.activePairsTracked = this.activePairsTracker!.size;
+    // BUG-M-01 FIX: Use optional chaining — tracker is null before start() completes
+    this.activePairsTracker?.trackPair(pairKey, chain, dex);
+    this.systemMetrics.activePairsTracked = this.activePairsTracker?.size ?? 0;
   }
 
   // ===========================================================================
