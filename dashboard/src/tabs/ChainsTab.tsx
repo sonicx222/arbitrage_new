@@ -26,6 +26,11 @@ export function ChainsTab() {
   const { feed } = useFeed();
 
   // E-06: Derive per-chain metrics from recent execution feed
+  // Sanity cap: reject per-execution values above $100k (likely bad data from
+  // mispriced DEX oracles on newer L2s like Linea/Mode/Scroll)
+  const PROFIT_SANITY_CAP = 100_000;
+  const GAS_SANITY_CAP = 10_000;
+
   const chainStats = useMemo(() => {
     const stats: Record<string, ChainStats> = {};
     for (const item of feed) {
@@ -44,8 +49,12 @@ export function ChainsTab() {
         entry.totalLatency += latencyMs;
         entry.latencyCount++;
       }
-      if (actualProfit != null && Number.isFinite(actualProfit)) entry.totalProfit += actualProfit;
-      if (gasCost != null && Number.isFinite(gasCost)) entry.totalGasCost += gasCost;
+      if (actualProfit != null && Number.isFinite(actualProfit) && Math.abs(actualProfit) < PROFIT_SANITY_CAP) {
+        entry.totalProfit += actualProfit;
+      }
+      if (gasCost != null && Number.isFinite(gasCost) && gasCost < GAS_SANITY_CAP) {
+        entry.totalGasCost += gasCost;
+      }
     }
     return stats;
   }, [feed]);

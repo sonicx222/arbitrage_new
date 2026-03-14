@@ -95,6 +95,31 @@ describe('CexDexSpreadCalculator', () => {
       const spread = calculator.getSpread('WBTC', 'ethereum');
       expect(spread).toBe(0); // Division by zero guarded
     });
+
+    it('should return 0 spread for near-zero CEX price (below $0.01)', () => {
+      calculator.updateDexPrice('WBTC', 'ethereum', 43000, now);
+      calculator.updateCexPrice('WBTC', 0.001, now);
+
+      const spread = calculator.getSpread('WBTC', 'ethereum');
+      expect(spread).toBe(0); // Near-zero price guard
+    });
+
+    it('should return 0 spread for near-zero DEX price (below $0.01)', () => {
+      calculator.updateDexPrice('WETH', 'scroll', 0.005, now);
+      calculator.updateCexPrice('WETH', 3200, now);
+
+      const spread = calculator.getSpread('WETH', 'scroll');
+      expect(spread).toBe(0); // Near-zero DEX price guard
+    });
+
+    it('should cap extreme spreads at ±999%', () => {
+      // CEX: $0.10, DEX: $100 -> raw spread = 99900%, should be capped at 999
+      calculator.updateDexPrice('WBTC', 'ethereum', 100, now);
+      calculator.updateCexPrice('WBTC', 0.10, now);
+
+      const spread = calculator.getSpread('WBTC', 'ethereum');
+      expect(spread).toBe(999);
+    });
   });
 
   // ===========================================================================

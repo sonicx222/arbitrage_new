@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatUsd, formatPct, formatDuration, formatMemory, formatNumber, calcSuccessRate, formatCpu, statusColor, statusDot, thresholdColor } from './format';
+import { formatUsd, formatPct, formatDuration, formatMemory, formatNumber, calcSuccessRate, formatCpu, statusColor, statusDot, thresholdColor, formatPrice, formatSpread } from './format';
 
 describe('formatUsd', () => {
   it('formats small values with 2 decimals', () => {
@@ -8,6 +8,22 @@ describe('formatUsd', () => {
 
   it('formats values >= 1000 as k', () => {
     expect(formatUsd(1500)).toBe('$1.5k');
+  });
+
+  it('formats millions as M', () => {
+    expect(formatUsd(2500000)).toBe('$2.5M');
+  });
+
+  it('formats billions as B', () => {
+    expect(formatUsd(1200000000)).toBe('$1.2B');
+  });
+
+  it('formats trillions as T', () => {
+    expect(formatUsd(131108263500473.6)).toBe('$131.1T');
+  });
+
+  it('formats negative large values', () => {
+    expect(formatUsd(-5000000)).toBe('-$5.0M');
   });
 
   it('returns fallback for NaN', () => {
@@ -55,20 +71,25 @@ describe('formatDuration', () => {
     expect(formatDuration(3661)).toBe('1h 1m');
   });
 
-  it('returns 0m for zero', () => {
-    expect(formatDuration(0)).toBe('0m');
+  it('formats seconds for sub-minute values', () => {
+    expect(formatDuration(30)).toBe('30s');
+    expect(formatDuration(59)).toBe('59s');
   });
 
-  it('returns 0m for negative', () => {
-    expect(formatDuration(-10)).toBe('0m');
+  it('returns 0s for zero', () => {
+    expect(formatDuration(0)).toBe('0s');
   });
 
-  it('returns 0m for NaN', () => {
-    expect(formatDuration(NaN)).toBe('0m');
+  it('returns 0s for negative', () => {
+    expect(formatDuration(-10)).toBe('0s');
   });
 
-  it('returns 0m for Infinity', () => {
-    expect(formatDuration(Infinity)).toBe('0m');
+  it('returns 0s for NaN', () => {
+    expect(formatDuration(NaN)).toBe('0s');
+  });
+
+  it('returns 0s for Infinity', () => {
+    expect(formatDuration(Infinity)).toBe('0s');
   });
 });
 
@@ -130,6 +151,54 @@ describe('formatCpu', () => {
   it('returns fallback for null/undefined', () => {
     expect(formatCpu(null as unknown as number)).toBe('0.0');
     expect(formatCpu(undefined as unknown as number)).toBe('0.0');
+  });
+});
+
+describe('formatPrice', () => {
+  it('formats normal prices', () => {
+    expect(formatPrice(3200.50)).toBe('3,200.50');
+    expect(formatPrice(0.05)).toBe('0.05');
+  });
+
+  it('returns INVALID for astronomical prices', () => {
+    expect(formatPrice(9964814686.43)).toBe('INVALID');
+  });
+
+  it('returns <0.001 for very small prices', () => {
+    expect(formatPrice(0.0001)).toBe('<0.001');
+  });
+
+  it('returns 0.00 for zero', () => {
+    expect(formatPrice(0)).toBe('0.00');
+  });
+
+  it('returns N/A for NaN/Infinity', () => {
+    expect(formatPrice(NaN)).toBe('N/A');
+    expect(formatPrice(Infinity)).toBe('N/A');
+  });
+
+  it('formats large valid prices with commas', () => {
+    expect(formatPrice(65000)).toBe('65,000.00');
+  });
+});
+
+describe('formatSpread', () => {
+  it('formats normal spreads', () => {
+    expect(formatSpread(0.33)).toBe('+0.330%');
+    expect(formatSpread(-1.5)).toBe('-1.500%');
+  });
+
+  it('caps extreme positive spreads', () => {
+    expect(formatSpread(1e32)).toBe('>999%');
+  });
+
+  it('caps extreme negative spreads', () => {
+    expect(formatSpread(-5000)).toBe('<-999%');
+  });
+
+  it('returns N/A for NaN/Infinity', () => {
+    expect(formatSpread(NaN)).toBe('N/A');
+    expect(formatSpread(Infinity)).toBe('N/A');
   });
 });
 

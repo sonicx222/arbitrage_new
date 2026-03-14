@@ -274,12 +274,19 @@ export class CexDexSpreadCalculator extends EventEmitter {
   /**
    * Calculate spread percentage.
    * spreadPct = ((dexPrice - cexPrice) / cexPrice) * 100
+   *
+   * Returns 0 when either price is below the minimum threshold ($0.01),
+   * preventing nonsensical spreads from near-zero or uninitialized prices.
    */
   private calculateSpread(cexPrice: number, dexPrice: number): number {
-    if (cexPrice === 0) {
+    // Guard: prices below $0.01 are likely uninitialized or garbage data
+    const MIN_PRICE = 0.01;
+    if (cexPrice < MIN_PRICE || dexPrice < MIN_PRICE) {
       return 0;
     }
-    return ((dexPrice - cexPrice) / cexPrice) * 100;
+    const spread = ((dexPrice - cexPrice) / cexPrice) * 100;
+    // Cap at ±999% to prevent astronomical values from bad data
+    return Math.max(-999, Math.min(999, spread));
   }
 
   /**

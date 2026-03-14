@@ -5,7 +5,7 @@ import { EmptyState } from '../components/EmptyState';
 import { SectionHeader } from '../components/SectionHeader';
 import { StatRow } from '../components/StatRow';
 import { StatusBadge } from '../components/StatusBadge';
-import { formatNumber, formatDuration } from '../lib/format';
+import { formatNumber, formatDuration, formatPrice, formatSpread } from '../lib/format';
 import type { CompactPercentiles, DiagnosticsSnapshot, CexSpreadData } from '../lib/types';
 
 // ---------------------------------------------------------------------------
@@ -323,13 +323,16 @@ function CexSpreadSection({ data }: { data: CexSpreadData }) {
           columns={[
             { header: 'Token', render: (a) => <span className="font-mono text-gray-300">{a.tokenId}</span> },
             { header: 'Chain', render: (a) => <span className="text-gray-400">{a.chain}</span> },
-            { header: 'CEX $', align: 'right', render: (a) => <span className="font-mono">{a.cexPrice.toFixed(2)}</span> },
-            { header: 'DEX $', align: 'right', render: (a) => <span className="font-mono">{a.dexPrice.toFixed(2)}</span> },
-            { header: 'Spread', align: 'right', render: (a) => (
-              <span className={`font-mono font-bold ${a.spreadPct > 0 ? 'text-accent-green' : 'text-accent-red'}`}>
-                {a.spreadPct > 0 ? '+' : ''}{a.spreadPct.toFixed(3)}%
-              </span>
-            ) },
+            { header: 'CEX $', align: 'right', render: (a) => <span className="font-mono">{formatPrice(a.cexPrice)}</span> },
+            { header: 'DEX $', align: 'right', render: (a) => <span className={`font-mono ${a.dexPrice > 1e9 ? 'text-accent-red' : ''}`}>{formatPrice(a.dexPrice)}</span> },
+            { header: 'Spread', align: 'right', render: (a) => {
+              const capped = Math.abs(a.spreadPct) > 1000;
+              return (
+                <span className={`font-mono font-bold ${capped ? 'text-accent-red' : a.spreadPct > 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                  {formatSpread(a.spreadPct)}
+                </span>
+              );
+            } },
           ]}
           data={alerts}
           keyExtractor={(a) => `${a.tokenId}-${a.chain}`}

@@ -78,7 +78,8 @@ export function OpportunitiesTab() {
       byChain[chain] = (byChain[chain] ?? 0) + 1;
       const type = opp.type ?? 'simple';
       byType[type] = (byType[type] ?? 0) + 1;
-      totalProfit += opp.estimatedProfit ?? opp.expectedProfit ?? 0;
+      const profit = opp.estimatedProfit ?? opp.expectedProfit ?? 0;
+      if (Math.abs(profit) < 100_000) totalProfit += profit;
       avgConfidence += opp.confidence;
       if (opp.status === 'pending') pending++;
       if (opp.status === 'expired') expired++;

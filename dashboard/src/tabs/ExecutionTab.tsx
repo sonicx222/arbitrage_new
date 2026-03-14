@@ -44,7 +44,7 @@ export function ExecutionTab() {
     const byChain: Record<string, { gas: number; count: number }> = {};
     for (const item of allExecutions) {
       const { gasCost, actualProfit, chain } = item.data;
-      if (gasCost != null && Number.isFinite(gasCost)) {
+      if (gasCost != null && Number.isFinite(gasCost) && gasCost < 10_000) {
         totalGas += gasCost;
         gasCount++;
         const key = chain.toLowerCase();
@@ -52,7 +52,7 @@ export function ExecutionTab() {
         entry.gas += gasCost;
         entry.count++;
       }
-      if (actualProfit != null && Number.isFinite(actualProfit)) totalProfit += actualProfit;
+      if (actualProfit != null && Number.isFinite(actualProfit) && Math.abs(actualProfit) < 100_000) totalProfit += actualProfit;
     }
     const avgGas = gasCount > 0 ? totalGas / gasCount : 0;
     const gasRatio = totalProfit > 0 ? (totalGas / totalProfit) * 100 : 0;

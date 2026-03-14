@@ -1746,9 +1746,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
     const actualProfit = getNumber(rawResult, 'actualProfit', 0);
     const gasCost = getNumber(rawResult, 'gasCost', 0);
 
+    // Sanity cap: reject per-execution profit above $100k — likely bad data from
+    // mispriced DEX oracles on newer L2s (Linea, Mode, Scroll)
+    const PROFIT_SANITY_CAP = 100_000;
+
     if (success) {
       this.systemMetrics.successfulExecutions++;
-      if (actualProfit > 0) {
+      if (actualProfit > 0 && actualProfit < PROFIT_SANITY_CAP) {
         this.systemMetrics.totalProfit += actualProfit;
       }
     }

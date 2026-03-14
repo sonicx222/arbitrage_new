@@ -522,23 +522,22 @@ export class UnifiedChainDetector extends EventEmitter implements PartitionDetec
     const healthyChains = Array.from(chainHealth.values()).filter(h => h.status === 'healthy').length;
     const totalChains = chainHealth.size;
 
-    // PERF-FIX: Calculate actual CPU usage percentage using process.cpuUsage()
-    // CPU usage is measured as elapsed microseconds / wall clock time * 100
+    // PERF-FIX: Calculate actual CPU usage as a 0–1 fraction using process.cpuUsage()
+    // Matches CpuUsageTracker.getUsagePercent() contract: 0.35 = 35% CPU.
+    // Dashboard formatCpu() multiplies by 100 for display.
     const currentCpu = process.cpuUsage();
     const now = Date.now();
-    let cpuUsagePercent = 0;
+    let cpuUsageFraction = 0;
 
     if (this.lastCpuUsage) {
       const elapsedMs = now - this.lastCpuUsage.timestamp;
       if (elapsedMs > 0) {
-        // Calculate delta CPU time in microseconds
         const userDelta = currentCpu.user - this.lastCpuUsage.user;
         const systemDelta = currentCpu.system - this.lastCpuUsage.system;
         const totalCpuMicros = userDelta + systemDelta;
-        // Convert elapsed wall time to microseconds for percentage calculation
-        const elapsedMicros = elapsedMs * 1000;
-        // CPU percentage (can exceed 100% on multi-core systems, so cap at reasonable value)
-        cpuUsagePercent = Math.min((totalCpuMicros / elapsedMicros) * 100, 400);
+        const elapsedMicros = elapsedMs * 1000; // ms → μs
+        // CPU fraction (can exceed 1.0 on multi-core systems, cap at 4.0 = 400%)
+        cpuUsageFraction = Math.min(totalCpuMicros / elapsedMicros, 4);
       }
     }
 
@@ -566,7 +565,7 @@ export class UnifiedChainDetector extends EventEmitter implements PartitionDetec
       totalEventsProcessed: totalEvents,
       avgEventLatencyMs: totalChains > 0 ? totalLatency / totalChains : 0,
       memoryUsage: memUsage.heapUsed,
-      cpuUsage: Math.round(cpuUsagePercent * 100) / 100, // Round to 2 decimal places
+      cpuUsage: Math.round(cpuUsageFraction * 1000) / 1000, // Round to 3 decimal places (0–1 fraction)
       uptimeSeconds,
       lastHealthCheck: Date.now(),
       // BUG-FIX: Use Map.size for accurate active opportunity count
