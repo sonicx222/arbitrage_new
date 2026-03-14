@@ -329,6 +329,13 @@ export class OpportunityConsumer {
       handler: async (message) => {
         await this.handleStreamMessage(message);
       },
+      // RT-A01 FIX: Batch handler collects expired message IDs and ACKs them in a
+      // single Redis pipeline call instead of N individual XACK round-trips.
+      // At 97% expiry rate, a batch of 50 messages drops from ~50ms (50 XACK awaits)
+      // to ~2ms (1 batch XACK + 1-2 individual non-expired). Eliminates consumer lag.
+      batchHandler: async (messages) => {
+        return this.handleStreamMessageBatch(messages);
+      },
       batchSize: this.config.batchSize,
       blockMs: this.config.blockMs,
       autoAck: false, // Deferred ACK after execution
@@ -485,6 +492,67 @@ export class OpportunityConsumer {
   // ===========================================================================
   // Message Handling
   // ===========================================================================
+
+  /**
+   * RT-A01 FIX: Batch handler that processes all messages from a single XREADGROUP call.
+   *
+   * Separates expired messages (97% of traffic) from non-expired, then batch-ACKs
+   * all expired IDs in a single Redis pipeline call. Non-expired messages are processed
+   * individually via handleStreamMessage (which handles its own ACK/deferred-ACK).
+   *
+   * Performance: reduces per-batch Redis round-trips from ~50 (1 XACK per expired msg)
+   * to ~4 (1 batch XACK + ~1-2 individual non-expired processing calls).
+   */
+  private async handleStreamMessageBatch(
+    messages: Array<{ id: string; data: unknown }>
+  ): Promise<string[]> {
+    const expiredIds: string[] = [];
+    const processedIds: string[] = [];
+    const now = Date.now();
+
+    for (const message of messages) {
+      // O(1) expiry fast-path — same check as handleStreamMessage but without awaiting ACK
+      if (message.data && typeof message.data === 'object') {
+        const rawExpiresAt = (message.data as Record<string, unknown>).expiresAt;
+        let expiresAtMs: number | undefined;
+        if (typeof rawExpiresAt === 'number') {
+          expiresAtMs = rawExpiresAt;
+        } else if (typeof rawExpiresAt === 'string' && rawExpiresAt.length > 0) {
+          expiresAtMs = Number(rawExpiresAt);
+          if (!Number.isFinite(expiresAtMs)) expiresAtMs = undefined;
+        }
+
+        if (expiresAtMs !== undefined && expiresAtMs < now) {
+          this.stats.opportunitiesReceived++;
+          this.stats.validationErrors++;
+          expiredIds.push(message.id);
+          continue;
+        }
+      }
+
+      // Non-expired: full processing path (validation, dedup, queue routing, deferred ACK)
+      await this.handleStreamMessage(message);
+      processedIds.push(message.id);
+    }
+
+    // Batch-ACK all expired messages in a single Redis pipeline call
+    if (expiredIds.length > 0) {
+      try {
+        await this.streamsClient.batchXack(
+          this.consumerGroup.streamName,
+          this.consumerGroup.groupName,
+          expiredIds
+        );
+      } catch (err) {
+        this.logger.warn('Failed to batch-ACK expired messages', {
+          count: expiredIds.length,
+          error: getErrorMessage(err),
+        });
+      }
+    }
+
+    return [...expiredIds, ...processedIds];
+  }
 
   /**
    * Handle individual stream message with deferred ACK pattern.

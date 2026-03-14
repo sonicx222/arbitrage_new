@@ -463,7 +463,7 @@ export class ExecutionEngineService {
     // State machine for lifecycle management
     this.stateManager = config.stateManager ?? createServiceState({
       serviceName: 'execution-engine',
-      transitionTimeoutMs: parseEnvIntSafe('STATE_TRANSITION_TIMEOUT_MS', 30000, 1000)
+      transitionTimeoutMs: parseEnvIntSafe('STATE_TRANSITION_TIMEOUT_MS', 90000, 1000)
     });
 
     // Initialize stats
