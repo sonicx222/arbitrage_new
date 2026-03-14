@@ -455,6 +455,20 @@ export const V3_APPROVED_ROUTERS: Record<string, Record<string, string>> = {
   ethereum: {
     uniswap_v3: '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Uniswap V3 SwapRouter
   },
+  // T3-5 FIX: Added V3 routers for chains that have V3 DEXs in DEX_FACTORY_REGISTRY
+  optimism: {
+    uniswap_v3: '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Uniswap V3 SwapRouter (CREATE2)
+  },
+  linea: {
+    pancakeswap_v3: '0x678Aa4bF4E210cf2166753e054d5b7c31cc7fa86', // PancakeSwap V3 SmartRouter
+  },
+  blast: {
+    thruster_v3: '0x337827814155ECBf24D20231fCA4444F530C0555', // Thruster V3 Router (RPC-verified)
+  },
+  scroll: {
+    uniswap_v3: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45', // SwapRouter02 (RPC-verified)
+    sushiswap_v3: '0x734583f62Bb6ACe3c9bA9bd5A53143CA2Ce8C55A', // RouteProcessor (RPC-verified)
+  },
 };
 
 // =============================================================================

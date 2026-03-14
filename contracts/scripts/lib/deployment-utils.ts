@@ -1257,6 +1257,13 @@ export async function smokeTestFlashLoanContract(
           return false;
         }
         console.log(`   minimumProfit: ${ethers.formatEther(profit)} ETH`);
+        // T3-1 FIX: Warn if minimumProfit is too high for 6-decimal tokens (USDC/USDT).
+        // 1e12 in 6-decimal terms = $1M — any value above this blocks all 6-decimal trades.
+        if (profit > 10n ** 12n) {
+          console.warn('   ⚠️  minimumProfit > 1e12 — will block ALL 6-decimal token trades (USDC/USDT)');
+          console.warn(`   For 6-decimal tokens: ${ethers.formatUnits(profit, 6)} USDC equivalent`);
+          console.warn('   Consider lowering via setMinimumProfit() or using per-token off-chain checks');
+        }
         return true;
       },
       critical: true, // Mainnet deployments must have non-zero minimumProfit to prevent griefing
