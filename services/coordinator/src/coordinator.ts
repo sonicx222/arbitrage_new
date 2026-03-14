@@ -293,6 +293,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private alertCooldownManager: AlertCooldownManager | null = null;
   // FIX: Alert notifier for sending alerts to Discord/Slack
   private alertNotifier: AlertNotifier | null = null;
+  // FIX #14: Store CEX feed listener references for explicit removal in stop()
+  private cexDegradedListener: (() => void) | null = null;
+  private cexConnectedListener: (() => void) | null = null;
 
   // FIX P2: Circuit breaker for execution forwarding
   // Prevents hammering the execution stream when it's down
@@ -726,8 +729,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
     await cexFeed.start();
 
     // CEX resilience: alert on degradation and recovery.
+    // FIX #14: Store listener references for explicit cleanup in stop()
     let wasDegraded = false;
-    cexFeed.on('maxReconnectFailed', () => {
+    this.cexDegradedListener = () => {
       wasDegraded = true;
       this.sendAlert({
         type: 'CEX_FEED_DEGRADED',
@@ -738,9 +742,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
         data: { healthSnapshot: cexFeed.getHealthSnapshot() },
         timestamp: Date.now(),
       });
-    });
-
-    cexFeed.on('connected', () => {
+    };
+    this.cexConnectedListener = () => {
       if (wasDegraded) {
         wasDegraded = false;
         this.sendAlert({
@@ -752,7 +755,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
           timestamp: Date.now(),
         });
       }
-    });
+    };
+    cexFeed.on('maxReconnectFailed', this.cexDegradedListener);
+    cexFeed.on('connected', this.cexConnectedListener);
 
     this.logger.info('CEX price feed started', {
       mode: isSimMode ? 'simulation (synthetic CEX prices)' : 'live (Binance WS)',
@@ -998,6 +1003,16 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }
 
       // ADR-036: Stop CEX price feed
+      // FIX #14: Remove listeners before reset to prevent accumulation on singleton reuse
+      if (this.cexDegradedListener || this.cexConnectedListener) {
+        try {
+          const cexFeed = getCexPriceFeedService();
+          if (this.cexDegradedListener) cexFeed.removeListener('maxReconnectFailed', this.cexDegradedListener);
+          if (this.cexConnectedListener) cexFeed.removeListener('connected', this.cexConnectedListener);
+        } catch { /* CEX feed may not be initialized */ }
+        this.cexDegradedListener = null;
+        this.cexConnectedListener = null;
+      }
       await resetCexPriceFeedService();
 
       // M-07 FIX: Parallelize Redis disconnects (was sequential = 15s worst case).
