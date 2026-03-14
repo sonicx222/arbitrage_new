@@ -21,7 +21,9 @@
  */
 
 // P3-1 FIX: Set max listeners before imports to prevent MaxListenersExceededWarning.
-// Pino transports add process.on('exit') per logger, exceeding the default 10 limit.
+// Breakdown: ~10 Pino loggers (coordinator, sse-routes, core modules) each add process.on('exit'),
+// + cross-region health manager (~3 event types), + setupServiceShutdown SIGTERM/SIGINT (~2),
+// + ioredis connections (~3 reconnect listeners). Total ~18, set 25 for headroom.
 process.setMaxListeners(25);
 
 // P2-004 FIX: Export reusable utilities for other services
@@ -30,6 +32,8 @@ export { CoordinatorService } from './coordinator';
 // Internal imports for bootstrapping
 import { CoordinatorService } from './coordinator';
 import { getCrossRegionHealthManager, resetCrossRegionHealthManager, getRuntimeMonitor } from '@arbitrage/core/monitoring';
+// ARCH-L-07 FIX: Import FailoverEvent from core instead of defining locally
+import type { FailoverEvent } from '@arbitrage/core/monitoring';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import { setupServiceShutdown, runServiceMain } from '@arbitrage/core/service-lifecycle';
 import { parseEnvInt } from '@arbitrage/core/utils';
@@ -118,18 +122,12 @@ async function main() {
     // Start cross-region health manager
     await crossRegionManager.start();
 
-    // FIX: Add explicit types for event handlers to satisfy strict TypeScript
+    // ARCH-L-07 FIX: LeaderChangeEvent defined locally (not exported from @arbitrage/core).
+    // FailoverEvent imported from @arbitrage/core/monitoring above.
     interface LeaderChangeEvent {
       type: string;
       targetRegion: string;
       sourceRegion: string;
-    }
-
-    interface FailoverEvent {
-      sourceRegion: string;
-      targetRegion: string;
-      services?: string[];
-      durationMs?: number;
     }
 
     // Wire up failover events

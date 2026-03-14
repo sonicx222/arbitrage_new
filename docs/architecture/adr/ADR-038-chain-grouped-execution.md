@@ -33,7 +33,7 @@ Split the single `stream:execution-requests` into four per-group streams, mirror
 | Group | Chains | Stream | MAXLEN |
 |-------|--------|--------|--------|
 | `fast` | bsc, polygon, avalanche, fantom | `stream:exec-requests-fast` | 25,000 |
-| `l2` | arbitrum, optimism, base, scroll, blast | `stream:exec-requests-l2` | 25,000 |
+| `l2` | arbitrum, optimism, base, scroll, blast, mantle, mode | `stream:exec-requests-l2` | 25,000 |
 | `premium` | ethereum, zksync, linea | `stream:exec-requests-premium` | 25,000 |
 | `solana` | solana | `stream:exec-requests-solana` | 10,000 |
 

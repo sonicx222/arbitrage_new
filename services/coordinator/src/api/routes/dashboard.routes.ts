@@ -77,10 +77,13 @@ export function createDashboardRoutes(state: CoordinatorStateProvider): Router {
     router.get('/', (_req: Request, res: Response) => {
       const metrics = state.getSystemMetrics();
       const serviceHealth = state.getServiceHealthMap();
+      // SEC-L-04 FIX: HTML-escape metric values to prevent XSS if metrics ever contain strings.
+      // Currently all numbers, but this is defensive against future changes.
+      const esc = (v: unknown) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       res.send(`<!DOCTYPE html><html><head><title>Arbitrage Dashboard</title>
         <style>body{font-family:monospace;background:#1a1a2e;color:#eee;padding:20px}</style></head>
         <body><h2>Arbitrage System (legacy view)</h2>
-        <p>Health: ${metrics.systemHealth.toFixed(1)}% | Services: ${serviceHealth.size} | Executions: ${metrics.totalExecutions}</p>
+        <p>Health: ${esc(metrics.systemHealth.toFixed(1))}% | Services: ${esc(serviceHealth.size)} | Executions: ${esc(metrics.totalExecutions)}</p>
         <p><small>Build the React dashboard: <code>cd dashboard && npm run build</code></small></p>
         <script>setTimeout(()=>location.reload(),10000)</script></body></html>`);
     });

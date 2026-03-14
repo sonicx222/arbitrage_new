@@ -10,7 +10,6 @@
  * Environment Variables:
  * - DISCORD_WEBHOOK_URL: Discord webhook for alerts
  * - SLACK_WEBHOOK_URL: Slack webhook for alerts
- * - ALERT_EMAIL: Email address for critical alerts (via SendGrid/SES)
  *
  * @see coordinator.ts sendAlert()
  */

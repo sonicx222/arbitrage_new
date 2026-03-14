@@ -848,7 +848,25 @@ export class OpportunityRouter {
 
     const parsed: ParsedOpp[] = [];
     let expiredInBatch = 0;
+    let entryIndex = 0;
     for (const entry of batch) {
+      entryIndex++;
+      // P3-4 FIX: Mid-batch short-circuit when backlog is stale.
+      // If first 100+ messages are >95% expired, remaining are almost certainly stale too.
+      // ACK them all and let skipStaleOpportunityBacklogIfNeeded reset the consumer.
+      if (entryIndex >= 100 && expiredInBatch > entryIndex * 0.95) {
+        for (let j = entryIndex; j < batch.length; j++) {
+          processedIds.push(batch[j].streamMessageId);
+          expiredInBatch++;
+        }
+        this.logger.info('Mid-batch short-circuit: backlog is stale', {
+          processedSoFar: entryIndex,
+          expiredSoFar: expiredInBatch,
+          totalBatch: batch.length,
+          skipped: batch.length - entryIndex,
+        });
+        break;
+      }
       const data = entry.data;
       const id = data.id as string | undefined;
       // P0 Fix DF-002: ACK messages with missing/invalid IDs instead of silently skipping.
@@ -1297,6 +1315,10 @@ export class OpportunityRouter {
     error: Error | null
   ): Promise<void> {
     if (!this.streamsClient) {
+      // BUG-L-02 FIX: Log when DLQ write is skipped due to uninitialized client
+      this.logger.debug('Cannot move to DLQ — streams client not initialized', {
+        id: opportunity.id,
+      });
       return;
     }
 

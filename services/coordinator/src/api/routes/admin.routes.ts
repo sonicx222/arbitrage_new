@@ -189,7 +189,8 @@ export function createAdminRoutes(state: CoordinatorStateProvider): Router {
       const newLevel = level as LogLevel;
       setLogLevel(newLevel);
       logger.info('Log level changed via hot-reload', { newLevel });
-      res.json({ level: newLevel });
+      // ARCH-L-02 FIX: Include success field to match API.md documentation
+      res.json({ success: true, level: newLevel });
     }
   );
 

@@ -831,8 +831,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
     });
 
     // ST-010 FIX: Trim stale DLQ entries from previous sessions at startup.
+    // P3-10 FIX: Configurable cutoff (default 1 hour).
     try {
-      const dlqTrimCutoffMs = Date.now() - 3_600_000; // 1 hour
+      const dlqTrimCutoffMs = Date.now() - safeParseInt(process.env.DLQ_TRIM_CUTOFF_MS, 3_600_000);
       const trimmed = await this.streamsClient!.xtrim(
         CoordinatorService.DLQ_STREAM,
         { minId: `${dlqTrimCutoffMs}-0` }
@@ -859,7 +860,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
     }
 
     // Recover pending messages from previous coordinator instance
-    await this.streamConsumerManager!.recoverPendingMessages(
+    // BUG-L-01 FIX: Use optional chaining — manager is null before start() completes
+    await this.streamConsumerManager?.recoverPendingMessages(
       this.consumerGroups.map(g => ({
         streamName: g.streamName,
         groupName: g.groupName,
@@ -1175,6 +1177,18 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }
     }
 
+    // P3-12 FIX: Send alert on partial consumer group creation failure so operators
+    // know degraded stream consumption is occurring (not just warn-level logs).
+    if (failureCount > 0 && successCount > 0) {
+      this.sendAlert({
+        type: 'CONSUMER_GROUP_PARTIAL_FAILURE',
+        message: `${failureCount} of ${this.consumerGroups.length} consumer groups failed to create — degraded stream consumption`,
+        severity: 'high',
+        data: { successCount, failureCount, total: this.consumerGroups.length },
+        timestamp: Date.now(),
+      });
+    }
+
     // OP-19 FIX: Alert if any consumer groups failed to create
     if (failureCount > 0) {
       const message = `${failureCount}/${failureCount + successCount} consumer groups failed to create`;
@@ -1302,9 +1316,14 @@ export class CoordinatorService implements CoordinatorStateProvider {
     const rawHandlers: Record<string, (msg: StreamMessage) => Promise<void>> = {
       [RedisStreamsClient.STREAMS.HEALTH]: (msg) => this.handleHealthMessage(msg),
       [RedisStreamsClient.STREAMS.OPPORTUNITIES]: (msg) => this.handleOpportunityMessage(msg),
-      [RedisStreamsClient.STREAMS.WHALE_ALERTS]: (msg) => handleWhaleAlertMessage(msg, handlerDeps),
-      [RedisStreamsClient.STREAMS.SWAP_EVENTS]: (msg) => handleSwapEventMessage(msg, handlerDeps),
-      [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: (msg) => handleVolumeAggregateMessage(msg, handlerDeps),
+      // P3-2 FIX: Wrap secondary handlers in withLogContext for automatic traceId/spanId.
+      // Previously only hot-path handlers (opportunities, execution-results) had trace context.
+      [RedisStreamsClient.STREAMS.WHALE_ALERTS]: (msg) =>
+        withLogContext(createFastTraceContext('coordinator'), () => handleWhaleAlertMessage(msg, handlerDeps)),
+      [RedisStreamsClient.STREAMS.SWAP_EVENTS]: (msg) =>
+        withLogContext(createFastTraceContext('coordinator'), () => handleSwapEventMessage(msg, handlerDeps)),
+      [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: (msg) =>
+        withLogContext(createFastTraceContext('coordinator'), () => handleVolumeAggregateMessage(msg, handlerDeps)),
       [RedisStreamsClient.STREAMS.PRICE_UPDATES]: (msg) => handlePriceUpdateMessage(msg, handlerDeps, unwrapBatch),
       // OP-10 FIX: Consume execution results to populate successfulExecutions/totalProfit
       [RedisStreamsClient.STREAMS.EXECUTION_RESULTS]: (msg) => this.handleExecutionResultMessage(msg),
@@ -1313,7 +1332,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // P1 Fix DF-004: Reuse DLQ handler for forwarding DLQ — same logging/monitoring.
       [RedisStreamsClient.STREAMS.FORWARDING_DLQ]: (msg) => handleDlqMessage(msg, handlerDeps, traceUtils),
       // C-02 FIX: Handle service degradation/recovery events from graceful-degradation-manager.
-      [RedisStreamsClient.STREAMS.SERVICE_DEGRADATION]: (msg) => handleServiceDegradationMessage(msg, handlerDeps),
+      // P3-2 FIX: Wrapped with trace context
+      [RedisStreamsClient.STREAMS.SERVICE_DEGRADATION]: (msg) =>
+        withLogContext(createFastTraceContext('coordinator'), () => handleServiceDegradationMessage(msg, handlerDeps)),
     };
 
     // REFACTOR: Use injected StreamConsumer class for testability
@@ -1550,19 +1571,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // OP-3 FIX: Pass trace context for propagation to execution engine
     const processed = await this.opportunityRouter.processOpportunity(data, this.getIsLeader(), traceCtx);
     if (processed) {
-      // Update local metrics from router
-      this.systemMetrics.totalOpportunities = this.opportunityRouter.getTotalOpportunities();
-      this.systemMetrics.pendingOpportunities = this.opportunityRouter.getPendingCount();
-      this.systemMetrics.totalExecutions = this.opportunityRouter.getTotalExecutions();
       // P0 FIX #3: Only reset errors when opportunity is successfully processed.
       this.streamConsumerManager?.resetErrors();
     }
-    // P1-7 FIX: Always sync dropped opportunities (not just when processed)
-    this.systemMetrics.opportunitiesDropped = this.opportunityRouter.getOpportunitiesDropped();
-    // SM-001 FIX: Sync per-reason forwarding metrics for /stats observability
-    this.systemMetrics.forwardingMetrics = this.opportunityRouter.getForwardingMetrics();
-    // Phase 1 Admission Control: Sync admission metrics for Prometheus/health
-    this.systemMetrics.admissionMetrics = this.opportunityRouter.getAdmissionMetrics();
+    // PERF-L-02 FIX: Use extracted helper to sync all router metrics
+    this.syncRouterMetrics(this.opportunityRouter);
 
     // REF-02 FIX: Extracted consumer lag detection to shared method
     await this.skipStaleOpportunityBacklogIfNeeded();
@@ -1619,13 +1632,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.getIsLeader(),
     );
 
-    // Sync metrics from router
-    this.systemMetrics.totalOpportunities = router.getTotalOpportunities();
-    this.systemMetrics.pendingOpportunities = router.getPendingCount();
-    this.systemMetrics.totalExecutions = router.getTotalExecutions();
-    this.systemMetrics.opportunitiesDropped = router.getOpportunitiesDropped();
-    this.systemMetrics.forwardingMetrics = router.getForwardingMetrics();
-    this.systemMetrics.admissionMetrics = router.getAdmissionMetrics();
+    // PERF-L-02 FIX: Use extracted helper to sync all router metrics
+    this.syncRouterMetrics(router);
 
     if (processedIds.length > 0) {
       this.streamConsumerManager?.resetErrors();
@@ -1968,6 +1976,19 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
   // handleServiceDegradationMessage: extracted to streaming/stream-handlers.ts
   // handleDlqMessage: extracted to streaming/stream-handlers.ts
+
+  /**
+   * PERF-L-02 FIX: Sync all opportunity router metrics into systemMetrics.
+   * Extracted to eliminate 6-line duplication between single-message and batch handlers.
+   */
+  private syncRouterMetrics(router: OpportunityRouter): void {
+    this.systemMetrics.totalOpportunities = router.getTotalOpportunities();
+    this.systemMetrics.pendingOpportunities = router.getPendingCount();
+    this.systemMetrics.totalExecutions = router.getTotalExecutions();
+    this.systemMetrics.opportunitiesDropped = router.getOpportunitiesDropped();
+    this.systemMetrics.forwardingMetrics = router.getForwardingMetrics();
+    this.systemMetrics.admissionMetrics = router.getAdmissionMetrics();
+  }
 
   /**
    * P1-2: Delegates to ActivePairsTracker.cleanup().

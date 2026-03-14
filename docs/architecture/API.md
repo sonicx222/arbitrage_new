@@ -299,7 +299,7 @@ Returns the current Pino log level.
 
 #### PUT /api/log-level
 
-**Auth:** Required. Rate-limited (admin rate limiter: 5 req / 15 min).
+**Auth:** Required. Rate-limited (10 req / 1 min).
 
 Dynamically changes the Pino log level at runtime.
 

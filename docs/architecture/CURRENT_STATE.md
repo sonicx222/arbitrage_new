@@ -112,7 +112,7 @@ This document provides a snapshot of the current arbitrage trading system archit
 
 | Group | Members | Streams | Purpose |
 |-------|---------|---------|---------|
-| `coordinator-group` | Coordinator | health, opportunities (dedicated connection — ADR-037), whale-alerts, swap-events, volume-aggregates, price-updates, execution-results, dead-letter-queue | Orchestration, health monitoring, opportunity routing |
+| `coordinator-group` | Coordinator | health, opportunities (dedicated connection — ADR-037), whale-alerts, swap-events, volume-aggregates, price-updates, execution-results, dead-letter-queue, forwarding-dlq, service-degradation | Orchestration, health monitoring, opportunity routing |
 | `cross-chain-detector-group` | Cross-Chain Detector | price-updates, whale-alerts, pending-opportunities | Cross-chain opportunity detection |
 | `execution-engine-group` | Execution Engine | exec-requests-{fast\|l2\|premium\|solana} (ADR-038), or stream:pre-simulated when ASYNC_PIPELINE_SPLIT=true (ADR-039) | Processes forwarded opportunities |
 | `execution-engine-group` | Fast Lane Consumer | fast-lane | Processes fast-lane high-priority opportunities |

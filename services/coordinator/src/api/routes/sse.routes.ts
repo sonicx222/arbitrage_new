@@ -104,6 +104,8 @@ function startTimerPool(state: CoordinatorStateProvider): void {
 
   timers.push(setInterval(() => {
     if (clients.size === 0) return;
+    // P3-7 NOTE: Object.fromEntries copies the Map every interval (~0.01ms).
+    // Caching doesn't help since health data (heartbeats, uptime) changes each tick.
     broadcast('services', JSON.stringify(Object.fromEntries(state.getServiceHealthMap())));
   }, SSE_INTERVAL_SERVICES));
 
