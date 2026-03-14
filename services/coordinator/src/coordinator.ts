@@ -2590,8 +2590,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * @see handleHealthMessage for how health is updated
    * @see ADR-002 for health reporting architecture
    */
-  getServiceHealthMap(): Map<string, ServiceHealth> {
-    return new Map(this.serviceHealth);
+  getServiceHealthMap(): ReadonlyMap<string, ServiceHealth> {
+    return this.serviceHealth;
   }
 
   /**
@@ -2606,10 +2606,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * - System health score (0-100)
    * - Various event counters (swaps, alerts, etc.)
    *
-   * @returns Copy of current system metrics
+   * @returns Read-only reference to current system metrics
    */
-  getSystemMetrics(): SystemMetrics {
-    return { ...this.systemMetrics };
+  getSystemMetrics(): Readonly<SystemMetrics> {
+    return this.systemMetrics;
   }
 
   /**

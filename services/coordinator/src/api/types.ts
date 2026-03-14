@@ -127,11 +127,11 @@ export interface CoordinatorStateProvider {
   /** Leader election lock key */
   getLockKey(): string;
 
-  /** Current system metrics */
-  getSystemMetrics(): SystemMetrics;
+  /** Current system metrics (read-only reference — do not mutate) */
+  getSystemMetrics(): Readonly<SystemMetrics>;
 
-  /** Map of service name to health status */
-  getServiceHealthMap(): Map<string, ServiceHealth>;
+  /** Map of service name to health status (read-only reference — do not mutate) */
+  getServiceHealthMap(): ReadonlyMap<string, ServiceHealth>;
 
   /** Map of opportunity ID to opportunity (ReadonlyMap — no copy on each call) */
   getOpportunities(): ReadonlyMap<string, ArbitrageOpportunity>;
