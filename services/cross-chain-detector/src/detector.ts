@@ -42,6 +42,7 @@ import {
   RedisStreamsClient,
   getRedisStreamsClient,
   ConsumerGroupConfig,
+  buildConsumerGroups,
 } from '@arbitrage/core/redis';
 import { CpuUsageTracker } from '@arbitrage/core/monitoring';
 import { ServiceStateManager, ServiceState, createServiceState } from '@arbitrage/core/service-lifecycle';
@@ -332,35 +333,14 @@ export class CrossChainDetectorService {
     // SA-007 FIX: Use ConsumerGroups enum from @arbitrage/types (was hardcoded string)
     const CONSUMER_GROUP = ConsumerGroups.CROSS_CHAIN_DETECTOR;
 
-    // Define consumer groups for streams we need to consume
-    this.consumerGroups = [
-      {
-        streamName: RedisStreamsClient.STREAMS.PRICE_UPDATES,
-        groupName: CONSUMER_GROUP,
-        consumerName: this.instanceId,
-        // P3 FIX: Use '0' to bootstrap from existing price data on first startup.
-        // With '$', the detector waits 60-147s for new price updates from partitions
-        // before chainsMonitored > 0 (readiness gate). Using '0' lets the detector
-        // process any existing messages in the stream, populating price state immediately.
-        // On subsequent restarts the consumer group remembers its position, so this
-        // only affects the very first run (or after a Redis flush).
-        // PriceDataManager's 5-minute cleanup handles stale entries.
-        startId: '0'
-      },
-      {
-        streamName: RedisStreamsClient.STREAMS.WHALE_ALERTS,
-        groupName: CONSUMER_GROUP,
-        consumerName: this.instanceId,
-        startId: '$'
-      },
-      // Task 1.3.3: Pending opportunities from mempool detection
-      {
-        streamName: RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES,
-        groupName: CONSUMER_GROUP,
-        consumerName: this.instanceId,
-        startId: '$'
-      }
-    ];
+    // CQ-10: Declarative consumer groups via buildConsumerGroups().
+    // P3 FIX: PRICE_UPDATES uses fromBeginning to bootstrap from existing price data
+    // on first startup. On subsequent restarts the consumer group remembers its position.
+    this.consumerGroups = buildConsumerGroups([
+      { stream: RedisStreamsClient.STREAMS.PRICE_UPDATES, fromBeginning: true },
+      { stream: RedisStreamsClient.STREAMS.WHALE_ALERTS },
+      { stream: RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES },
+    ], CONSUMER_GROUP, this.instanceId);
   }
 
   // ===========================================================================
