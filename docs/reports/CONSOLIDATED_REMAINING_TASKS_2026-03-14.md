@@ -100,12 +100,12 @@ Misaligned configs that silently degrade functionality.
 
 ### Tier 4: Security Hardening (4 items)
 
-| ID | Source | Description | Files |
-|----|--------|-------------|-------|
-| T4-1 | Services SEC-S-004 + Dashboard F-SEC-01/02 | SSE auth token in URL query param — needs two-step POST→nonce auth | `services/coordinator/src/api/routes/sse.routes.ts:189` |
-| T4-2 | Services SEC-S-006 | EE proxy endpoints `/ee/health`, `/circuit-breaker` have no auth middleware | `services/coordinator/src/api/routes/index.ts:143-196` |
-| T4-3 | ExtSvc #10 + Caching SEC-H-002 | Execution engine doesn't check `isFallback` flag on gas prices from GasPriceCache | `services/execution-engine/src/` (GasPriceOptimizer) |
-| T4-4 | CC M-06 | No runtime guard prevents flash loan attempt on zero-provider chains (Blast/Mode) | `services/execution-engine/src/` |
+| ID | Source | Description | Status |
+|----|--------|-------------|--------|
+| T4-1 | Services SEC-S-004 + Dashboard F-SEC-01/02 | SSE auth token in URL query param — needs two-step POST→nonce auth | **DEFERRED** (feature scope; timing-safe comparison in place) |
+| ~~T4-2~~ | Services SEC-S-006 | EE proxy endpoints `/ee/health`, `/circuit-breaker` have no auth middleware | **FIXED** (read auth on GET /circuit-breaker) |
+| ~~T4-3~~ | ExtSvc #10 + Caching SEC-H-002 | Execution engine doesn't check `isFallback` flag on gas prices from GasPriceCache | **FIXED** (50% surcharge on fallback gas prices) |
+| ~~T4-4~~ | CC M-06 | No runtime guard prevents flash loan attempt on zero-provider chains (Blast/Mode) | **FIXED** (explicit zero-provider guard with clear error) |
 
 ### Tier 5: Operational Quality (14 items)
 

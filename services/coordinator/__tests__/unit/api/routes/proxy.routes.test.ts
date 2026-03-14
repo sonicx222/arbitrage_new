@@ -469,12 +469,25 @@ describe('Proxy Routes (proxyToEE)', () => {
       expect(res.body).toEqual({ state: 'OPEN' });
     });
 
-    it('should NOT require auth for GET /circuit-breaker (read-only)', async () => {
-      // Even with apiAuth returning 401, GET should still work (no auth middleware)
+    // T4-2 FIX: GET /circuit-breaker now requires read auth (exposes CB state).
+    it('should require auth for GET /circuit-breaker', async () => {
       const security = require('@arbitrage/security');
       (security.apiAuth as jest.Mock).mockReturnValue(
         (_req: any, res: any, _next: any) => res.status(401).json({ error: 'Unauthorized' }),
       );
+
+      const app = createApp();
+
+      const res = await supertest(app).get('/circuit-breaker');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ error: 'Unauthorized' });
+    });
+
+    it('should proxy GET /circuit-breaker when authenticated', async () => {
+      const security = require('@arbitrage/security');
+      const passthrough = (_req: any, _res: any, next: any) => next();
+      (security.apiAuth as jest.Mock).mockReturnValue(passthrough);
 
       const app = createApp();
 

@@ -768,8 +768,8 @@ describe('FlashLoanStrategy', () => {
       expect(strategy.isProtocolSupported('unknown-chain')).toBe(false);
     });
 
-    it('should return error for unsupported protocol chain execution', async () => {
-      // Use a chain not configured in FLASH_LOAN_PROVIDERS
+    it('should return error for zero-provider chain execution', async () => {
+      // T4-4: Chains with no flash loan providers get a specific error
       const opportunity = createMockOpportunity({ buyChain: 'unknown-test-chain' });
       const ctx = createMockContext();
       ctx.providers.set('unknown-test-chain', createMockProvider());
@@ -778,7 +778,7 @@ describe('FlashLoanStrategy', () => {
       const result = await strategy.execute(opportunity, ctx);
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('not supported');
+      expect(result.error).toContain('capital-at-risk execution only');
     });
 
     it('should get protocol for chain', () => {

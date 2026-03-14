@@ -480,12 +480,17 @@ export class GasPriceOptimizer {
       if (errorMessage.includes('Gas price spike')) {
         throw error;
       }
-      this.logger.warn('Failed to get optimal gas price, using chain-specific fallback', {
+      // T4-3 FIX: Apply 50% surcharge to fallback gas prices to account for staleness.
+      // Fallback prices are hardcoded per-chain and may be significantly outdated.
+      // The surcharge prevents executing with too-low gas that would cause tx failure.
+      const surcharged = fallbackPrice * 3n / 2n;
+      this.logger.warn('Failed to get optimal gas price, using fallback with surcharge', {
         chain,
         fallbackGwei: Number(fallbackPrice / WEI_PER_GWEI),
+        surchargedGwei: Number(surcharged / WEI_PER_GWEI),
         error
       });
-      return fallbackPrice;
+      return surcharged;
     }
   }
 

@@ -289,13 +289,15 @@ describe('GasPriceOptimizer', () => {
       expect(price).toBe(expectedPrice);
     });
 
-    it('should return fallback price on provider error', async () => {
+    it('should return fallback price with surcharge on provider error', async () => {
       const mockProvider = {
         getFeeData: jest.fn<() => Promise<any>>().mockRejectedValue(new Error('RPC error')),
       } as unknown as ethers.JsonRpcProvider;
 
       const price = await optimizer.getOptimalGasPrice('ethereum', mockProvider, gasBaselines);
-      expect(price).toBe(getFallbackGasPrice('ethereum'));
+      // T4-3: Fallback prices now include 50% surcharge for staleness safety
+      const expectedSurcharged = getFallbackGasPrice('ethereum') * 3n / 2n;
+      expect(price).toBe(expectedSurcharged);
     });
   });
 

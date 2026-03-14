@@ -209,7 +209,10 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
   const writeAuthorize = apiAuthorize('services', 'write');
   const authAdapter: RequestHandler = (req, res, next) => { writeAuth(req, res, next); };
   const authorizeAdapter: RequestHandler = (req, res, next) => { writeAuthorize(req, res, next); };
-  app.get('/circuit-breaker', (req: Request, res: Response) => {
+  // T4-2 FIX: Add read auth to GET /circuit-breaker — exposes CB state (open/closed, failure counts).
+  const readAuth = apiAuth();
+  const readAuthAdapter: RequestHandler = (req, res, next) => { readAuth(req, res, next); };
+  app.get('/circuit-breaker', readAuthAdapter, (req: Request, res: Response) => {
     proxyToEE('/circuit-breaker', req, res);
   });
   app.post('/circuit-breaker/open',

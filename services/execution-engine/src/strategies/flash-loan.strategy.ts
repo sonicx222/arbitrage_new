@@ -763,10 +763,32 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       };
     }
 
+    // T4-4 FIX: Explicit zero-provider guard. Chains like Blast/Mode have no flash
+    // loan providers at all — distinguish from "has provider but unsupported protocol".
+    const flashLoanConfig = FLASH_LOAN_PROVIDERS[chain];
+    if (!flashLoanConfig) {
+      const registryEntries = FLASH_LOAN_PROVIDER_REGISTRY[chain];
+      if (!registryEntries || registryEntries.length === 0) {
+        this.logger.warn('No flash loan provider available for chain (capital-at-risk only)', {
+          chain,
+          hint: 'This chain has no flash loan providers configured. Only direct execution is possible.',
+        });
+        return {
+          error: BaseExecutionStrategy.createOpportunityError(
+            opportunity,
+            formatExecutionError(
+              ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
+              `No flash loan provider available for chain '${chain}'. This chain supports capital-at-risk execution only.`
+            ),
+            chain
+          ),
+        };
+      }
+    }
+
     // Issue 4.1 Fix: Validate protocol support before execution
     // Supported: aave_v3, balancer_v2, pancakeswap_v3, syncswap
     if (!this.isProtocolSupported(chain)) {
-      const flashLoanConfig = FLASH_LOAN_PROVIDERS[chain];
       const protocol = flashLoanConfig?.protocol || 'unknown';
       this.logger.warn('Unsupported flash loan protocol for chain', {
         chain,
