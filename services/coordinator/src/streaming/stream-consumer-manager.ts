@@ -471,16 +471,23 @@ export class StreamConsumerManager {
 
   /**
    * Acknowledge a message after processing.
+   * P3-5 FIX: Returns false on ACK failure (message stays in PEL for redelivery).
+   * Tracks ackFailures for monitoring — callers can aggregate for metrics.
    */
-  private async ackMessage(groupConfig: ConsumerGroupConfig, messageId: string): Promise<void> {
+  private ackFailures = 0;
+  private async ackMessage(groupConfig: ConsumerGroupConfig, messageId: string): Promise<boolean> {
     try {
       await this.streamsClient.xack(groupConfig.streamName, groupConfig.groupName, messageId);
+      return true;
     } catch (error) {
+      this.ackFailures++;
       this.logger.error('Failed to ACK message', {
         stream: groupConfig.streamName,
         messageId,
         error: (error as Error).message,
+        totalAckFailures: this.ackFailures,
       });
+      return false;
     }
   }
 

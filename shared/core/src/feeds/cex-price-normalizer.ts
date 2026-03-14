@@ -99,6 +99,15 @@ const DEFAULT_BINANCE_MAPPINGS: Record<string, TokenMapping> = {
   },
 };
 
+/**
+ * P3-3 FIX: Export CEX-tracked token IDs derived from DEFAULT_BINANCE_MAPPINGS.
+ * Single source of truth — consumers (e.g., opportunity-router) import this
+ * instead of maintaining a hardcoded copy that can drift.
+ */
+export const CEX_TRACKED_TOKEN_IDS: ReadonlySet<string> = new Set(
+  Object.values(DEFAULT_BINANCE_MAPPINGS).map(m => m.tokenId)
+);
+
 // =============================================================================
 // CexPriceNormalizer
 // =============================================================================

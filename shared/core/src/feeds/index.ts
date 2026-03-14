@@ -33,6 +33,7 @@ export type {
 // CEX Price Normalizer
 export {
   CexPriceNormalizer,
+  CEX_TRACKED_TOKEN_IDS,
 } from './cex-price-normalizer';
 export type {
   NormalizedCexPrice,

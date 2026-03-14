@@ -1,7 +1,7 @@
 /**
  * Alert Notification Service
  *
- * Sends alerts to external channels (Discord, Slack, email).
+ * Sends alerts to external channels (Discord, Slack).
  * Implements the TODO from coordinator.ts for production alert delivery.
  *
  * FIX: Added circuit breaker pattern to prevent repeated failed requests
@@ -42,10 +42,17 @@ interface CircuitBreakerConfig {
   successResetMs: number;
 }
 
+/** P3-8 FIX: Env-configurable CB defaults (previously hardcoded). */
+function safeInt(val: string | undefined, fallback: number): number {
+  if (!val) return fallback;
+  const n = parseInt(val, 10);
+  return Number.isNaN(n) || n <= 0 ? fallback : n;
+}
+
 const DEFAULT_CIRCUIT_CONFIG: CircuitBreakerConfig = {
-  failureThreshold: 5,
-  resetTimeoutMs: 60000, // 1 minute
-  successResetMs: 30000  // 30 seconds
+  failureThreshold: safeInt(process.env.ALERT_CB_FAILURE_THRESHOLD, 5),
+  resetTimeoutMs: safeInt(process.env.ALERT_CB_RESET_TIMEOUT_MS, 60000),
+  successResetMs: safeInt(process.env.ALERT_CB_SUCCESS_RESET_MS, 30000),
 };
 
 /**

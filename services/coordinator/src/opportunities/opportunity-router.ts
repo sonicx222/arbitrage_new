@@ -16,7 +16,7 @@ import { tmpdir } from 'os';
 import { RedisStreams, normalizeChainId, isCanonicalChainId, type ArbitrageOpportunity, type PipelineTimestamps } from '@arbitrage/types';
 import { findKSmallest } from '@arbitrage/core/data-structures';
 import type { TraceContext } from '@arbitrage/core/tracing';
-import { getCexPriceFeedService } from '@arbitrage/core/feeds';
+import { getCexPriceFeedService, CEX_TRACKED_TOKEN_IDS } from '@arbitrage/core/feeds';
 import { getLatencyTracker } from '@arbitrage/core/monitoring';
 import { FEATURE_FLAGS, CORE_TOKENS, getEstimatedGasCostUsd } from '@arbitrage/config';
 import { serializeOpportunityForStream } from '../utils/stream-serialization';
@@ -72,8 +72,11 @@ function extractPipelineTimestamps(parsed: Record<string, unknown>): PipelineTim
 // CEX Token Address Resolution (ADR-036)
 // =============================================================================
 
-/** Tokens tracked by CEX feed (Binance trade stream) */
-const CEX_TOKEN_IDS = new Set(['WETH', 'WBTC', 'WBNB', 'SOL', 'AVAX', 'MATIC', 'ARB', 'OP', 'FTM']);
+/**
+ * P3-3 FIX: Import CEX-tracked token IDs from normalizer (single source of truth).
+ * Previously hardcoded as ['WETH', 'WBTC', 'WBNB', 'SOL', 'AVAX', 'MATIC', 'ARB', 'OP', 'FTM']
+ * which drifted from normalizer defaults (AVAX→WAVAX, MATIC→WMATIC, FTM→WFTM).
+ */
 
 /** Lazy reverse map: token address (lowercase) -> token ID for CEX lookup */
 let _addressToTokenId: Map<string, string> | null = null;
@@ -83,7 +86,7 @@ function getAddressToTokenIdMap(): Map<string, string> {
   _addressToTokenId = new Map();
   for (const tokens of Object.values(CORE_TOKENS)) {
     for (const token of tokens) {
-      if (CEX_TOKEN_IDS.has(token.symbol)) {
+      if (CEX_TRACKED_TOKEN_IDS.has(token.symbol)) {
         _addressToTokenId.set(token.address.toLowerCase(), token.symbol);
       }
     }
