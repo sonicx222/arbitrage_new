@@ -990,7 +990,7 @@ describe('P0 Fix Regression: net profit includes gas costs and swap fees', () =>
    *
    * Where:
    *   gasCostPerToken = (estimatedGasCost × 2) / tradeTokens  (source + dest chains)
-   *   swapFeePerToken = feePercentage × (sourcePrice + destPrice)  (buy + sell fees)
+   *   swapFeePerToken = sourceFee × sourcePrice + destFee × destPrice  (per-DEX fees, P2-16)
    */
   it('should subtract gas costs and swap fees from net profit', () => {
     // Given: ETH at $3000 on source, $3060 on dest (2% spread)

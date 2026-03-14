@@ -101,6 +101,14 @@ jest.mock('@arbitrage/core/redis', () => ({
       PENDING_OPPORTUNITIES: 'stream:pending-opportunities',
     },
   },
+  buildConsumerGroups: jest.fn((defs: Array<{ stream: string; handler: unknown }>) =>
+    defs.map((d: { stream: string; handler: unknown }) => ({
+      streamName: d.stream,
+      groupName: 'cross-chain-detector-group',
+      consumerName: 'test',
+      handler: d.handler,
+    }))
+  ),
 }));
 
 jest.mock('@arbitrage/core/async', () => ({
@@ -403,13 +411,13 @@ describe('CrossChainDetectorService', () => {
       expect(disconnectWithTimeout).toHaveBeenCalledWith(
         mockStreamsClient,
         'Streams client',
-        4000, // SA-1R-003 FIX: 4s per disconnect × 2 = 8s < 10s force-exit
+        8000, // SA-031 FIX: 8s per disconnect × 2 = 16s < 20s force-exit
         sharedMockLogger
       );
       expect(disconnectWithTimeout).toHaveBeenCalledWith(
         mockRedisClient,
         'Redis',
-        4000, // SA-1R-003 FIX: 4s per disconnect × 2 = 8s < 10s force-exit
+        8000, // SA-031 FIX: 8s per disconnect × 2 = 16s < 20s force-exit
         sharedMockLogger
       );
     });
@@ -661,6 +669,67 @@ describe('CrossChainDetectorService', () => {
       expect(result[0].mlSupported).toBe(true);
       expect(result[0].mlSourceDirection).toBe('up');
       expect(result[0].mlConfidenceBoost).toBeGreaterThan(1);
+    });
+
+    it('should use per-DEX fees instead of uniform fee (P2-16)', () => {
+      // Curve has 0.04% fee vs Uniswap's 0.30% — lower fees = higher net profit
+      mockBridgeCostEstimator.getDetailedEstimate.mockReturnValue({
+        costEth: 0.0001,
+        costUsd: 0.3,
+        predictedLatency: 120,
+        reliability: 0.95,
+      });
+      mockBridgeCostEstimator.extractTokenAmount.mockReturnValue(100000);
+
+      // Same prices, different DEXes
+      const pricesWithCurve = [
+        createPricePoint({ chain: 'ethereum', dex: 'curve', price: 2500 }),
+        createPricePoint({ chain: 'bsc', dex: 'curve', price: 2750 }),
+      ];
+      const pricesWithUniswap = [
+        createPricePoint({ chain: 'ethereum', dex: 'uniswap', price: 2500 }),
+        createPricePoint({ chain: 'bsc', dex: 'uniswap', price: 2750 }),
+      ];
+
+      const curveResult = callFindArbitrage(service, pricesWithCurve);
+      const uniResult = callFindArbitrage(service, pricesWithUniswap);
+
+      expect(curveResult.length).toBe(1);
+      expect(uniResult.length).toBe(1);
+
+      // Curve (0.04%) should yield higher net profit than Uniswap (0.30%)
+      expect(curveResult[0].netProfit).toBeGreaterThan(uniResult[0].netProfit);
+    });
+
+    it('should use explicit feeDecimal from price update when available (P2-16)', () => {
+      mockBridgeCostEstimator.getDetailedEstimate.mockReturnValue({
+        costEth: 0.0001,
+        costUsd: 0.3,
+        predictedLatency: 120,
+        reliability: 0.95,
+      });
+      mockBridgeCostEstimator.extractTokenAmount.mockReturnValue(100000);
+
+      // Create price points with explicit fee (Uniswap V3 0.05% tier)
+      const lowFeePoint = createPricePoint({ chain: 'ethereum', dex: 'uniswap', price: 2500 });
+      (lowFeePoint.update as any).feeDecimal = 0.0005; // 0.05% V3 tier
+      const lowFeePointDest = createPricePoint({ chain: 'bsc', dex: 'uniswap', price: 2750 });
+      (lowFeePointDest.update as any).feeDecimal = 0.0005;
+
+      // Default Uniswap (0.30%)
+      const defaultFeePoints = [
+        createPricePoint({ chain: 'ethereum', dex: 'uniswap', price: 2500 }),
+        createPricePoint({ chain: 'bsc', dex: 'uniswap', price: 2750 }),
+      ];
+
+      const lowFeeResult = callFindArbitrage(service, [lowFeePoint, lowFeePointDest]);
+      const defaultResult = callFindArbitrage(service, defaultFeePoints);
+
+      expect(lowFeeResult.length).toBe(1);
+      expect(defaultResult.length).toBe(1);
+
+      // Explicit 0.05% fee should yield higher net profit than default 0.30%
+      expect(lowFeeResult[0].netProfit).toBeGreaterThan(defaultResult[0].netProfit);
     });
   });
 

@@ -47,6 +47,7 @@ import {
 import { CpuUsageTracker } from '@arbitrage/core/monitoring';
 import { ServiceStateManager, ServiceState, createServiceState } from '@arbitrage/core/service-lifecycle';
 import { disconnectWithTimeout } from '@arbitrage/core/utils';
+import { resolveFeeValue } from '@arbitrage/core/utils/fee-utils';
 import { createLogger, getPerformanceLogger, PerformanceLogger } from '@arbitrage/core';
 import {
   ARBITRAGE_CONFIG,
@@ -1507,8 +1508,12 @@ export class CrossChainDetectorService {
     const gasCostPerToken = tradeTokens > 0
       ? (sourceGasCostUsd + destGasCostUsd) / tradeTokens
       : 0;
-    // Swap fees: buy on source + sell on dest (per-token cost from price * fee rate)
-    const swapFeePerToken = ARBITRAGE_CONFIG.feePercentage * (lowestPrice.price + highestPrice.price);
+    // P2-16 FIX: Per-DEX swap fees instead of uniform 0.3%.
+    // Uses actual pair fee (feeDecimal) when available, falls back to DEX-specific default
+    // (0.04% for Curve/Balancer, 0.3% for others). Exact fees are recalculated at execution.
+    const sourceFee = resolveFeeValue(lowestPrice.update.feeDecimal ?? lowestPrice.update.fee, lowestPrice.dex);
+    const destFee = resolveFeeValue(highestPrice.update.feeDecimal ?? highestPrice.update.fee, highestPrice.dex);
+    const swapFeePerToken = sourceFee * lowestPrice.price + destFee * highestPrice.price;
 
     // netProfitPerToken is the per-unit net profit, used for the threshold check
     const netProfitPerToken = priceDiff - bridgeCost - gasCostPerToken - swapFeePerToken;
