@@ -119,7 +119,16 @@ export class CircuitBreakerManager {
 
   /**
    * Check if execution is allowed on a specific chain.
-   * Returns true if disabled (fail-open for execution, fail-closed handled elsewhere).
+   *
+   * P2-6 NOTE: Returns true (fail-open) when circuit breakers are disabled.
+   * This is intentional — multiple defense layers exist beyond CB:
+   * - Risk management orchestrator (in-flight trade limits, chain risk assessment)
+   * - Gas spike detection (rejects when gas > threshold)
+   * - Provider health checks (rejects when provider is unhealthy)
+   * - Simulation pre-flight (rejects when tx would revert)
+   *
+   * Fail-closed (rejecting all trades) when CB is disabled would prevent the
+   * system from operating in simulation mode or when CB is intentionally off.
    */
   canExecute(chainId: string): boolean {
     if (!this.enabled) return true;

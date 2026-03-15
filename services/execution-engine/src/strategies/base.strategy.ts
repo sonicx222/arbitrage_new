@@ -1210,6 +1210,9 @@ export abstract class BaseExecutionStrategy {
       return false;
     }
 
+    // P2-4 NOTE: MaxUint256 is standard DeFi practice (saves gas on repeated swaps).
+    // Per-chain wallet isolation + KMS signers mitigate blast radius.
+    // Use revokeTokenApproval() below for emergency revocation.
     const maxApproval = ethers.MaxUint256;
     const approveTx = await tokenContract.approve(spenderAddress, maxApproval);
     await approveTx.wait();
@@ -1221,6 +1224,37 @@ export abstract class BaseExecutionStrategy {
     });
 
     return true;
+  }
+
+  /**
+   * P2-4 FIX: Revoke token approval for a spender (set allowance to 0).
+   * Use for emergency revocation or when a router is decommissioned.
+   *
+   * @param tokenAddress - ERC20 token address
+   * @param spenderAddress - Router/contract to revoke approval from
+   * @param chain - Target chain
+   * @param ctx - Strategy context (provides wallet)
+   */
+  async revokeTokenApproval(
+    tokenAddress: string,
+    spenderAddress: string,
+    chain: string,
+    ctx: StrategyContext
+  ): Promise<void> {
+    const wallet = ctx.wallets.get(chain);
+    if (!wallet) {
+      throw new Error(`No wallet for chain: ${chain}`);
+    }
+
+    const tokenContract = new ethers.Contract(tokenAddress, ERC20_APPROVE_ABI, wallet);
+    const revokeTx = await tokenContract.approve(spenderAddress, 0);
+    await revokeTx.wait();
+
+    this.logger.info('Token approval revoked', {
+      token: tokenAddress,
+      spender: spenderAddress,
+      chain,
+    });
   }
 
   // ===========================================================================

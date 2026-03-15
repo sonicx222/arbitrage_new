@@ -897,7 +897,13 @@ export class ProviderServiceImpl implements IProviderService {
     this.providers.clear();
     this.wallets.clear();
     this.providerHealth.clear();
-    // Fix #9: Clear cached private keys on shutdown
+    // Fix #9 + P2-5 FIX: Overwrite cached private keys before clearing.
+    // JS strings are immutable and can't be zeroed, but overwriting the Map
+    // values removes references to the original key strings sooner, narrowing
+    // the GC window. For real fund safety, use KMS (FEATURE_KMS_SIGNING=true).
+    for (const key of this.chainPrivateKeys.keys()) {
+      this.chainPrivateKeys.set(key, '');
+    }
     this.chainPrivateKeys.clear();
     // Phase 2 Item 27: Drain queued KMS sign operations, then clear signers
     for (const signer of this.kmsSigners.values()) {
