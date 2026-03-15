@@ -1311,6 +1311,7 @@ export abstract class BaseExecutionStrategy {
     nonce?: number;
     usedMevProtection?: boolean;
     isHybridMock?: boolean;
+    isSimulated?: boolean;
   }> {
     // Simulate network latency
     await new Promise(resolve => setTimeout(resolve, DEFAULT_HYBRID_CONFIG.mockLatencyMs));
@@ -1326,6 +1327,7 @@ export abstract class BaseExecutionStrategy {
         success: false,
         error: '[HYBRID_MOCK] Simulated transaction failure',
         isHybridMock: true,
+        isSimulated: true,
       };
     }
 
@@ -1386,6 +1388,7 @@ export abstract class BaseExecutionStrategy {
       nonce: mockNonce,
       usedMevProtection: false,
       isHybridMock: true,
+      isSimulated: true,
     };
   }
 
@@ -1412,6 +1415,7 @@ export abstract class BaseExecutionStrategy {
     nonce?: number;
     usedMevProtection?: boolean;
     isHybridMock?: boolean;
+    isSimulated?: boolean;
   }> {
     // Check if hybrid mode is active
     if (this.isHybridMode()) {
@@ -1485,7 +1489,9 @@ export abstract class BaseExecutionStrategy {
     // ADR-040: Convert gas cost to USD using per-chain native token price.
     // Previously this subtracted native-token-denominated gas from USD-denominated
     // expectedProfit, causing systematic undercount on non-ETH chains (BSC, Polygon, etc.)
-    const chain = opportunity.chain ?? 'ethereum';
+    // P1-8 FIX: Use buyChain for gas price lookup — the receipt is from the execution chain,
+    // which is buyChain for cross-chain arbs. opportunity.chain is the source chain.
+    const chain = opportunity.buyChain ?? opportunity.chain ?? 'ethereum';
     const nativeTokenPriceUsd = getNativeTokenPrice(chain);
     const gasCostUsd = gasCostNative * nativeTokenPriceUsd;
     // P0-001 FIX: Use ?? to preserve 0 as valid profit (|| treats 0 as falsy)
@@ -1661,6 +1667,7 @@ export abstract class BaseExecutionStrategy {
       error?: string;
       nonce?: number;
       usedMevProtection?: boolean;
+      isSimulated?: boolean;
     },
     chain: string,
     options?: {
@@ -1680,6 +1687,7 @@ export abstract class BaseExecutionStrategy {
         error: submission.error ?? 'Unknown submission error',
         latencyMs,
         timestamp: Date.now(),
+        isSimulated: submission.isSimulated,
       };
     }
 
@@ -1705,6 +1713,7 @@ export abstract class BaseExecutionStrategy {
       latencyMs,
       timestamp: Date.now(),
       usedMevProtection: submission.usedMevProtection,
+      isSimulated: submission.isSimulated,
     };
   }
 

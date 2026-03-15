@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchJson } from '../hooks/useApi';
+import { useOpportunitiesSSE } from '../context/SSEContext';
 import { KpiCard } from '../components/KpiCard';
 import { KpiGrid } from '../components/KpiGrid';
 import { DataTable } from '../components/DataTable';
@@ -34,13 +35,37 @@ export function OpportunitiesTab() {
   // D-3: Multi-select chain filter (empty set = all chains)
   const [selectedChains, setSelectedChains] = useState<Set<string>>(new Set());
 
-  const { data: opportunities = [], isLoading, isError } = useQuery<Opportunity[]>({
+  // SSE-pushed opportunities (real-time, client-side deque — survives server TTL cleanup)
+  const { opportunities: sseOpportunities } = useOpportunitiesSSE();
+
+  // REST-polled opportunities (fallback for initial load / reconnection)
+  const { data: restOpportunities = [], isLoading, isError } = useQuery<Opportunity[]>({
     queryKey: ['opportunities'],
     queryFn: async () => validateOpportunities(await fetchJson('/api/opportunities')),
     refetchInterval: 10000,
     staleTime: 5000,
     retry: 1,
   });
+
+  // Merge SSE + REST: SSE is primary (has opportunities that expired server-side),
+  // REST fills in any currently-alive opportunities not yet received via SSE.
+  const opportunities = useMemo(() => {
+    const seen = new Set<string>();
+    const merged: Opportunity[] = [];
+    for (const opp of sseOpportunities) {
+      if (!seen.has(opp.id)) {
+        seen.add(opp.id);
+        merged.push(opp);
+      }
+    }
+    for (const opp of restOpportunities) {
+      if (!seen.has(opp.id)) {
+        seen.add(opp.id);
+        merged.push(opp);
+      }
+    }
+    return merged;
+  }, [sseOpportunities, restOpportunities]);
 
   const chains = useMemo(() => {
     const set = new Set<string>();

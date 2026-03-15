@@ -316,6 +316,8 @@ export class OpportunityRouter {
   private readonly streamsClient: OpportunityStreamsClient | null;
   private readonly circuitBreaker: CircuitBreaker;
   private readonly onAlert?: (alert: OpportunityAlert) => void;
+  // SSE push: notify coordinator when a new opportunity is stored
+  private readonly onOpportunityDetected?: (opp: ArbitrageOpportunity) => void;
   // T2-3 FIX: Callback to persist CB state to Redis after state changes.
   // The coordinator provides this so crash-restart cycles don't bypass CB protection.
   private readonly onCircuitBreakerChange?: (status: { failures: number; isOpen: boolean; lastFailure: number }) => void;
@@ -367,7 +369,8 @@ export class OpportunityRouter {
     streamsClient?: OpportunityStreamsClient | null,
     config?: OpportunityRouterConfig,
     onAlert?: (alert: OpportunityAlert) => void,
-    onCircuitBreakerChange?: (status: { failures: number; isOpen: boolean; lastFailure: number }) => void
+    onCircuitBreakerChange?: (status: { failures: number; isOpen: boolean; lastFailure: number }) => void,
+    onOpportunityDetected?: (opp: ArbitrageOpportunity) => void
   ) {
     this.logger = logger;
     this.circuitBreaker = circuitBreaker;
@@ -376,6 +379,7 @@ export class OpportunityRouter {
     this.effectiveMinProfitPercentage = this.config.minProfitPercentage;
     this.onAlert = onAlert;
     this.onCircuitBreakerChange = onCircuitBreakerChange;
+    this.onOpportunityDetected = onOpportunityDetected;
   }
 
   /**
@@ -755,6 +759,10 @@ export class OpportunityRouter {
     // wasting memory on stale opportunities during coordinator backlog)
     this.opportunities.set(id, opportunity);
     this._totalOpportunities++;
+
+    // Push to SSE clients so dashboard sees opportunities in real-time,
+    // independent of server-side TTL cleanup and REST poll intervals.
+    this.onOpportunityDetected?.(opportunity);
 
     // ADR-037: Downgraded from info to debug — at 181 opps/s, structured logging
     // on every opportunity adds ~0.1-0.5ms per message in the hot path.

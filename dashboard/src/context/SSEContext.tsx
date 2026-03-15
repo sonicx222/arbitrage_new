@@ -4,7 +4,7 @@ import { formatTime, calcSuccessRate } from '../lib/format';
 import { getItem } from '../lib/storage';
 import { sendNotification, startTitleFlash, stopTitleFlash } from '../lib/notifications';
 import { FAILURE_STREAK_THRESHOLD } from '../lib/feed-utils';
-import type { SystemMetrics, ServiceHealth, ExecutionResult, Alert, CircuitBreakerStatus, StreamHealth, FeedItem, ChartPoint, LagPoint, DiagnosticsSnapshot, CexSpreadData } from '../lib/types';
+import type { SystemMetrics, ServiceHealth, ExecutionResult, Alert, CircuitBreakerStatus, StreamHealth, FeedItem, ChartPoint, LagPoint, DiagnosticsSnapshot, CexSpreadData, Opportunity } from '../lib/types';
 
 // ---------------------------------------------------------------------------
 // State & Reducer (unchanged — single reducer for centralized state management)
@@ -18,6 +18,7 @@ interface SSEState {
   diagnostics: DiagnosticsSnapshot | null;
   cexSpread: CexSpreadData | null;
   feed: FeedItem[];
+  opportunities: Opportunity[];
   chartData: ChartPoint[];
   lagData: LagPoint[];
   status: SSEStatus;
@@ -34,6 +35,7 @@ type SSEAction =
   | { type: 'streams'; payload: StreamHealth }
   | { type: 'diagnostics'; payload: DiagnosticsSnapshot }
   | { type: 'cex-spread'; payload: CexSpreadData }
+  | { type: 'opportunity-detected'; payload: Opportunity }
   | { type: 'reset'; payload?: undefined };
 
 const MAX_FEED = 50;
@@ -113,6 +115,11 @@ export function reducer(state: SSEState, action: SSEAction): SSEState {
       const item: FeedItem = { kind: 'alert', data: action.payload, id: `a-${counter}` };
       return { ...state, feed: [item, ...state.feed.slice(0, MAX_FEED - 1)], nextFeedId: counter, lastEventTime };
     }
+    case 'opportunity-detected': {
+      // Client-side deque: accumulate opportunities independent of server-side TTL cleanup
+      const opportunities = [action.payload, ...state.opportunities.slice(0, MAX_FEED - 1)];
+      return { ...state, opportunities, lastEventTime };
+    }
     case 'reset':
       // L-01 FIX: Preserve chartData/lagData for visual continuity on reconnect.
       // Only reset feed/nextFeedId so charts don't empty on intermittent connectivity.
@@ -131,6 +138,7 @@ export const initialState: SSEState = {
   diagnostics: null,
   cexSpread: null,
   feed: [],
+  opportunities: [],
   chartData: loadSessionArray<ChartPoint>(CHART_STORAGE_KEY),
   lagData: loadSessionArray<LagPoint>(LAG_STORAGE_KEY),
   status: 'connecting',
@@ -150,6 +158,7 @@ interface FeedCtxValue { feed: FeedItem[] }
 interface StreamsCtxValue { streams: StreamHealth | null; lagData: LagPoint[] }
 interface DiagnosticsCtxValue { diagnostics: DiagnosticsSnapshot | null }
 interface CexSpreadCtxValue { cexSpread: CexSpreadData | null }
+interface OpportunitiesCtxValue { opportunities: Opportunity[] }
 interface ConnectionCtxValue { status: SSEStatus; lastEventTime: number | null; droppedEvents: number; paused: boolean; togglePause: () => void }
 
 const MetricsCtx = createContext<MetricsCtxValue>({ metrics: null, chartData: [] });
@@ -158,6 +167,7 @@ const FeedCtx = createContext<FeedCtxValue>({ feed: [] });
 const StreamsCtx = createContext<StreamsCtxValue>({ streams: null, lagData: [] });
 const DiagnosticsCtx = createContext<DiagnosticsCtxValue>({ diagnostics: null });
 const CexSpreadCtx = createContext<CexSpreadCtxValue>({ cexSpread: null });
+const OpportunitiesCtx = createContext<OpportunitiesCtxValue>({ opportunities: [] });
 const ConnectionCtx = createContext<ConnectionCtxValue>({ status: 'connecting', lastEventTime: null, droppedEvents: 0, paused: false, togglePause: () => {} });
 
 /** Metrics + chart data. Re-renders only on 'metrics' SSE events. */
@@ -172,6 +182,8 @@ export function useStreams() { return useContext(StreamsCtx); }
 export function useDiagnostics() { return useContext(DiagnosticsCtx); }
 /** CEX-DEX spread data (ADR-036). Re-renders only on 'cex-spread' events. */
 export function useCexSpread() { return useContext(CexSpreadCtx); }
+/** SSE-pushed opportunities. Accumulates client-side, independent of server TTL cleanup. */
+export function useOpportunitiesSSE() { return useContext(OpportunitiesCtx); }
 /** SSE connection status. Re-renders only on connect/disconnect/stale transitions. */
 export function useConnection() { return useContext(ConnectionCtx); }
 
@@ -232,6 +244,8 @@ export function validatePayload(event: string, data: unknown): boolean {
     case 'cex-spread':
       return isObj(data.stats) && Array.isArray(data.alerts)
         && typeof (data.stats as Record<string, unknown>).running === 'boolean';
+    case 'opportunity-detected':
+      return typeof data.id === 'string' && typeof data.confidence === 'number' && typeof data.timestamp === 'number';
     default:
       return false;
   }
@@ -401,6 +415,10 @@ export function SSEProvider({ children }: { children: ReactNode }) {
     () => ({ cexSpread: state.cexSpread }),
     [state.cexSpread],
   );
+  const opportunitiesValue = useMemo<OpportunitiesCtxValue>(
+    () => ({ opportunities: state.opportunities }),
+    [state.opportunities],
+  );
   const connectionValue = useMemo<ConnectionCtxValue>(
     () => ({ status, lastEventTime: state.lastEventTime, droppedEvents, paused, togglePause }),
     [status, state.lastEventTime, droppedEvents, paused, togglePause],
@@ -413,9 +431,11 @@ export function SSEProvider({ children }: { children: ReactNode }) {
           <StreamsCtx.Provider value={streamsValue}>
             <DiagnosticsCtx.Provider value={diagnosticsValue}>
               <CexSpreadCtx.Provider value={cexSpreadValue}>
-                <FeedCtx.Provider value={feedValue}>
-                  {children}
-                </FeedCtx.Provider>
+                <OpportunitiesCtx.Provider value={opportunitiesValue}>
+                  <FeedCtx.Provider value={feedValue}>
+                    {children}
+                  </FeedCtx.Provider>
+                </OpportunitiesCtx.Provider>
               </CexSpreadCtx.Provider>
             </DiagnosticsCtx.Provider>
           </StreamsCtx.Provider>

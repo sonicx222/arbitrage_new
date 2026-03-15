@@ -143,15 +143,18 @@ export class SimulationStrategy extends BaseExecutionStrategy {
           actualProfit: simulatedProfit,
           gasUsed: simulatedGasUsed,
           gasCost: simulatedGasCost,
+          isSimulated: true,
         }
       );
     } else {
-      return createErrorResult(
+      const result = createErrorResult(
         opportunity.id,
         'Simulated execution failure (random)',
         chain,
         dex
       );
+      result.isSimulated = true;
+      return result;
     }
   }
 

@@ -731,6 +731,29 @@ export class CoordinatorService implements CoordinatorStateProvider {
       (status) => {
         this.redis?.set('coordinator:cb:execution', status, 300)
           .catch((e) => { this.logger.debug('CB state persist failed (best-effort)', { error: (e as Error).message }); });
+      },
+      // SSE push: emit opportunity-detected event for real-time dashboard visibility
+      (opp) => {
+        this.emitSSE('opportunity-detected', {
+          id: opp.id,
+          type: opp.type,
+          chain: opp.chain,
+          buyDex: opp.buyDex,
+          sellDex: opp.sellDex,
+          buyChain: opp.buyChain,
+          sellChain: opp.sellChain,
+          tokenIn: opp.tokenIn,
+          tokenOut: opp.tokenOut,
+          expectedProfit: opp.expectedProfit,
+          estimatedProfit: opp.estimatedProfit,
+          profitPercentage: opp.profitPercentage,
+          confidence: opp.confidence,
+          timestamp: opp.timestamp,
+          expiresAt: opp.expiresAt,
+          status: opp.status ?? 'pending',
+          gasCost: opp.gasCost,
+          netProfit: opp.netProfit,
+        });
       }
     );
   }
@@ -1831,6 +1854,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       transactionHash: getOptionalString(rawResult, 'transactionHash'),
       latencyMs: getNumber(rawResult, 'latencyMs', 0),
       timestamp: getNumber(rawResult, 'timestamp', Date.now()),
+      isSimulated: rawResult.isSimulated === true || rawResult.isSimulated === 'true',
     });
 
     // P2-5: Do not reset stream errors from execution results.

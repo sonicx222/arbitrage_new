@@ -13,7 +13,7 @@ import type { FeedItem } from '../lib/types';
 
 type ExecutionFeedItem = Extract<FeedItem, { kind: 'execution' }>;
 
-const EXEC_CSV_HEADERS = ['Time', 'Status', 'Chain', 'DEX', 'Profit USD', 'Gas Cost', 'Latency ms', 'Tx Hash', 'Error'];
+const EXEC_CSV_HEADERS = ['Time', 'Status', 'Chain', 'DEX', 'Profit USD', 'Gas Cost', 'Latency ms', 'Tx Hash', 'Simulated', 'Error'];
 
 const CHART_RANGES = [
   { label: '5m', points: 150 },
@@ -115,6 +115,7 @@ export function ExecutionTab() {
         e.gasCost ?? '',
         e.latencyMs ?? '',
         e.transactionHash ?? '',
+        e.isSimulated ? 'yes' : 'no',
         e.error ?? '',
       ];
     }),
@@ -310,15 +311,22 @@ export function ExecutionTab() {
             { header: 'Latency', align: 'right', render: (item) => <span className="text-gray-500">{item.data.latencyMs != null ? `${item.data.latencyMs}ms` : '-'}</span> },
             { header: 'Tx', render: (item) => (
               item.data.transactionHash ? (
-                <a
-                  href={`${EXPLORER_URLS[item.data.chain.toLowerCase()] ?? ''}${item.data.transactionHash}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-accent-blue hover:underline font-mono"
-                  title={item.data.transactionHash}
-                >
-                  {item.data.transactionHash.slice(0, 8)}...
-                </a>
+                item.data.isSimulated ? (
+                  <span className="font-mono text-gray-500" title={item.data.transactionHash}>
+                    {item.data.transactionHash.slice(0, 8)}...
+                    <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-accent-yellow/15 text-accent-yellow">SIM</span>
+                  </span>
+                ) : (
+                  <a
+                    href={`${EXPLORER_URLS[item.data.chain.toLowerCase()] ?? ''}${item.data.transactionHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent-blue hover:underline font-mono"
+                    title={item.data.transactionHash}
+                  >
+                    {item.data.transactionHash.slice(0, 8)}...
+                  </a>
+                )
               ) : <span className="text-gray-600">-</span>
             ) },
           ]}

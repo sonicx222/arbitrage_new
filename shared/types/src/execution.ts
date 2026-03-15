@@ -42,6 +42,8 @@ export interface ExecutionResult {
   latencyMs?: number;
   /** Whether MEV protection was used */
   usedMevProtection?: boolean;
+  /** Whether this result came from simulation (no real blockchain tx) */
+  isSimulated?: boolean;
 }
 
 /**
@@ -132,6 +134,7 @@ export function createSuccessResult(
     gasCost?: number;
     latencyMs?: number;
     usedMevProtection?: boolean;
+    isSimulated?: boolean;
   }
 ): ExecutionResult {
   return {
@@ -143,6 +146,7 @@ export function createSuccessResult(
     gasCost: options?.gasCost,
     latencyMs: options?.latencyMs,
     usedMevProtection: options?.usedMevProtection,
+    isSimulated: options?.isSimulated,
     timestamp: Date.now(),
     chain,
     dex,
