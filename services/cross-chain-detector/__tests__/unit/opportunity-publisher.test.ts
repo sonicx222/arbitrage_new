@@ -419,5 +419,71 @@ describe('OpportunityPublisher', () => {
       expect(id1).toContain('cross-chain-');
       expect(id2).toContain('cross-chain-');
     });
+
+    // P1-6 Regression: amountIn must use correct token decimals
+    it('should use 18 decimals for WETH amountIn', async () => {
+      const publisher = createTestPublisher({ defaultTradeSizeUsd: 2500 });
+
+      // WETH at $2500 → 1 WETH → 1 * 10^18 = 1e18 wei
+      const opportunity = createTestOpportunity({
+        token: 'WETH/USDC',
+        sourceChain: 'ethereum',
+        sourcePrice: 2500,
+      });
+
+      await publisher.publish(opportunity);
+
+      const publishedOpp = mockStreamsClient.xaddWithLimit.mock.calls[0][1] as ArbitrageOpportunity;
+      expect(publishedOpp.amountIn).toBe(BigInt(1e18).toString());
+    });
+
+    it('should use 6 decimals for USDC amountIn', async () => {
+      const publisher = createTestPublisher({ defaultTradeSizeUsd: 1000 });
+
+      // USDC at $1 → 1000 USDC → 1000 * 10^6 = 1e9
+      const opportunity = createTestOpportunity({
+        token: 'USDC/USDT',
+        sourceChain: 'ethereum',
+        sourcePrice: 1,
+      });
+
+      await publisher.publish(opportunity);
+
+      const publishedOpp = mockStreamsClient.xaddWithLimit.mock.calls[0][1] as ArbitrageOpportunity;
+      expect(publishedOpp.amountIn).toBe(BigInt(1000 * 1e6).toString());
+    });
+
+    it('should use 8 decimals for WBTC amountIn', async () => {
+      const publisher = createTestPublisher({ defaultTradeSizeUsd: 60000 });
+
+      // WBTC at $60000 → 1 WBTC → 1 * 10^8 = 1e8 satoshis
+      const opportunity = createTestOpportunity({
+        token: 'WBTC/WETH',
+        sourceChain: 'ethereum',
+        sourcePrice: 60000,
+      });
+
+      await publisher.publish(opportunity);
+
+      const publishedOpp = mockStreamsClient.xaddWithLimit.mock.calls[0][1] as ArbitrageOpportunity;
+      expect(publishedOpp.amountIn).toBe(BigInt(1e8).toString());
+    });
+
+    it('should use 18 decimals for BSC USDT (BEP-20 override)', async () => {
+      const publisher = createTestPublisher({ defaultTradeSizeUsd: 1000 });
+
+      // BSC USDT uses 18 decimals (BEP-20 variant), not 6
+      const opportunity = createTestOpportunity({
+        token: 'USDT/BUSD',
+        sourceChain: 'bsc',
+        sourcePrice: 1,
+      });
+
+      await publisher.publish(opportunity);
+
+      const publishedOpp = mockStreamsClient.xaddWithLimit.mock.calls[0][1] as ArbitrageOpportunity;
+      // 1000 * 10^18 for BSC USDT
+      expect(publishedOpp.amountIn).toBe(BigInt(1000n * 10n ** 18n).toString());
+    });
   });
 });

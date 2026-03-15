@@ -24,7 +24,7 @@ import { PerformanceLogger } from '@arbitrage/core';
 import { createTraceContext, propagateContext } from '@arbitrage/core/tracing';
 import { withLogContext } from '@arbitrage/core/logging';
 import { ArbitrageOpportunity } from '@arbitrage/types';
-import { FEATURE_FLAGS, FAST_LANE_CONFIG } from '@arbitrage/config';
+import { FEATURE_FLAGS, FAST_LANE_CONFIG, getTokenDecimals } from '@arbitrage/config';
 // TYPE-CONSOLIDATION: Import shared types instead of duplicating
 import { Logger, CrossChainOpportunity } from './types';
 // RT-019 FIX: Wire up Prometheus metrics recording
@@ -190,21 +190,26 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
     const sourcePrice = opportunity.sourcePrice > 0 ? opportunity.sourcePrice : 1;
     const amountInTokens = defaultTradeSizeUsd / sourcePrice;
 
-    // Convert to wei (18 decimals) - use BigInt for precision
+    // Extract tokens from token string (format: "TOKEN0/TOKEN1")
+    const tokenParts = opportunity.token.split('/');
+    const tokenIn = tokenParts[0] || opportunity.token;
+    const tokenOut = tokenParts[1] || opportunity.token;
+
+    // P1-6 FIX: Use actual token decimals instead of hardcoded 18.
+    // USDC/USDT = 6, WBTC = 8, WETH/DAI = 18. Hardcoding 18 for USDC
+    // creates amounts 10^12 too large, effectively disabling cross-chain arb.
+    const tokenDecimals = getTokenDecimals(opportunity.sourceChain, '', tokenIn);
+
+    // Convert to smallest unit (wei for 18-decimal, micro-units for 6-decimal, etc.)
     // Guard against unreasonably large amounts that could overflow
     const MAX_AMOUNT_IN_TOKENS = 1e12;
     const safeAmountInTokens = Math.min(amountInTokens, MAX_AMOUNT_IN_TOKENS);
-    const amountInWei = BigInt(Math.floor(safeAmountInTokens * 1e18)).toString();
+    const amountInWei = BigInt(Math.floor(safeAmountInTokens * (10 ** tokenDecimals))).toString();
 
     // Calculate expected profit in USD.
     // Token profit = (percentageDiff/100) * amountInTokens; converting back to USD
     // via * sourcePrice cancels out: (pct/100) * (tradeUsd/price) * price = (pct/100) * tradeUsd.
     const expectedProfitUsd = (opportunity.percentageDiff / 100) * defaultTradeSizeUsd;
-
-    // Extract tokens from token string (format: "TOKEN0/TOKEN1")
-    const tokenParts = opportunity.token.split('/');
-    const tokenIn = tokenParts[0] || opportunity.token;
-    const tokenOut = tokenParts[1] || opportunity.token;
 
     return {
       id: `cross-chain-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,

@@ -683,9 +683,10 @@ export class CrossChainDetectorService {
 
       // Periodic bridge predictor cleanup (still managed here as cross-cutting concern)
       // PriceDataManager handles its own cleanup internally
-      // FIX 4.1: Cache pair count before modulo check to ensure consistent behavior
-      const currentPairCount = this.priceDataManager.getPairCount();
-      if (currentPairCount > 0 && currentPairCount % 100 === 0) {
+      // P1-8 FIX: Use monotonically-incrementing priceUpdatesConsumed counter instead of
+      // pairCount. Pair count stabilizes once all pairs are discovered, so pairCount % 100
+      // may never fire again — causing cleanup to stop permanently.
+      if (this.priceUpdatesConsumed % 100 === 0) {
         this.bridgePredictor.cleanup();
         if (this.opportunityPublisher) {
           this.opportunityPublisher.cleanup();
