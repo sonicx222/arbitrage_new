@@ -552,11 +552,30 @@ Returns 200 for `healthy`/`degraded`, 503 for `unhealthy`.
   "dlqAlert": false,
   "consumerLagPending": 2,
   "consumerLagAlert": false,
+  "riskState": "NORMAL",
+  "tradingAllowed": true,
+  "canExecute": true,
+  "positionSizeMultiplier": 1.0,
+  "currentDrawdown": 0.02,
+  "dailyPnLFraction": 0.01,
+  "haltCooldownRemainingMs": 0,
+  "tradeLoggerHealth": { "healthy": true, "currentFile": "trades-2026-03-15.jsonl" },
   "uptime": 3600.5,
   "memoryMB": 256,
   "timestamp": 1740000000000
 }
 ```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `riskState` | `string \| null` | Risk management state: `NORMAL`, `CAUTION`, or `HALT` |
+| `tradingAllowed` | `boolean \| null` | Whether the risk circuit breaker permits trading |
+| `canExecute` | `boolean` | Combined readiness: `tradingAllowed` AND (healthy providers OR simulation mode) |
+| `positionSizeMultiplier` | `number \| null` | Position sizing factor (1.0 = full size, reduced during CAUTION) |
+| `currentDrawdown` | `number \| null` | Current drawdown fraction (0.0–1.0) |
+| `dailyPnLFraction` | `number \| null` | Daily PnL as fraction of balance |
+| `haltCooldownRemainingMs` | `number \| null` | Milliseconds until HALT state auto-recovers (0 when not halted) |
+| `tradeLoggerHealth` | `object \| null` | Trade logger disk health (silent write failures = lost audit trail) |
 
 #### GET /ready
 
@@ -673,6 +692,20 @@ Force opens the circuit breaker. Accepts optional JSON body with `reason` field.
   "timestamp": 1740000000000
 }
 ```
+
+#### Fast Lane Consumer
+
+Feature-gated behind `FEATURE_FAST_LANE=true` (default: disabled).
+
+The FastLaneConsumer reads high-confidence arbitrage opportunities from `stream:fast-lane`, bypassing the coordinator for lower latency. It runs alongside the normal `OpportunityConsumer` (which reads from `stream:execution-requests`).
+
+**Key differences from OpportunityConsumer:**
+- Reads from `FAST_LANE` stream, not `EXECUTION_REQUESTS`
+- Immediate ACK after processing (no deferred ACK)
+- Dedup guard: skips opportunities already seen via the normal path
+- Same validation pipeline (structure + business rules)
+
+**Configuration:** Uses the same `ConsumerConfig` defaults as `OpportunityConsumer`. Consumer group: `execution-engine-fast-lane`.
 
 ---
 
