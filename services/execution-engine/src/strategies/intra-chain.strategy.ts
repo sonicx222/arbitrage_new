@@ -20,7 +20,7 @@
  */
 
 import { ethers } from 'ethers';
-import { COMMIT_REVEAL_CONTRACTS, DEXES, FEATURE_FLAGS, getCommitRevealContract, getTokenDecimals, hasCommitRevealContract } from '@arbitrage/config';
+import { COMMIT_REVEAL_CONTRACTS, DEXES, FEATURE_FLAGS, getCommitRevealContract, getNativeTokenPrice, getTokenDecimals, hasCommitRevealContract } from '@arbitrage/config';
 import { MevRiskAnalyzer, type TransactionContext } from '@arbitrage/core/mev-protection';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
@@ -465,8 +465,18 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
       }
 
       const tokenDecimals = getTokenDecimals(chain, tokenIn);
-      const minProfit = opportunity.expectedProfit
-        ? ethers.parseUnits((opportunity.expectedProfit * 0.8).toFixed(tokenDecimals), tokenDecimals)
+      // P0-1 FIX: Convert USD profit to token units before parseUnits.
+      // Without this, minProfit is inflated by tokenPriceUsd factor (e.g., 2000x for ETH),
+      // causing InsufficientProfit revert on every commit-reveal execution.
+      // Matches the correct pattern in flash-loan.strategy.ts:1739.
+      const tokenPriceUsd = opportunity.buyPrice && opportunity.buyPrice > 0
+        ? opportunity.buyPrice
+        : getNativeTokenPrice(chain);
+      const minProfit = opportunity.expectedProfit && opportunity.expectedProfit > 0
+        ? ethers.parseUnits(
+            Math.max(0, (opportunity.expectedProfit * 0.8) / tokenPriceUsd).toFixed(tokenDecimals),
+            tokenDecimals
+          )
         : ethers.parseUnits('0.001', tokenDecimals);
 
       // Build swap path for commit-reveal v2.0.0 interface
@@ -608,7 +618,9 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         chain,
         opportunity.buyDex || 'unknown',
         {
-          actualProfit: revealResult.profit ? parseFloat(ethers.formatEther(revealResult.profit)) : undefined,
+          // P1-7 FIX: Use formatUnits with token-specific decimals instead of formatEther (always 18).
+          // For USDC (6 decimals), formatEther underestimates profit by 10^12.
+          actualProfit: revealResult.profit ? parseFloat(ethers.formatUnits(revealResult.profit, tokenDecimals)) : undefined,
         }
       );
     } catch (error) {

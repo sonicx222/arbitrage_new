@@ -1699,16 +1699,13 @@ export class CrossChainDetectorService {
 
     let timestamps = this.bridgeDataRateLimit.get(routeKey);
     if (timestamps) {
-      // Prune timestamps outside the window
-      timestamps = timestamps.filter(t => now - t < windowMs);
-      // P1-3 FIX: Evict empty entries to prevent stale route key accumulation
-      if (timestamps.length === 0) {
-        this.bridgeDataRateLimit.delete(routeKey);
-        timestamps = [];
-        this.bridgeDataRateLimit.set(routeKey, timestamps);
-      } else {
-        this.bridgeDataRateLimit.set(routeKey, timestamps);
+      // P2-2 FIX: In-place mutation instead of .filter() to avoid array allocation.
+      // Timestamps are chronologically ordered (appended via push(now)), so evict oldest first.
+      while (timestamps.length > 0 && now - timestamps[0] >= windowMs) {
+        timestamps.shift();
       }
+      // No .set() needed — same array reference is already in the Map.
+      // Empty array = no recent activity, not rate-limited. Map capped at MAX_BRIDGE_ROUTES.
 
       if (timestamps.length >= maxUpdatesPerWindow) {
         this.logger.warn('Rate limited updateBridgeData', {

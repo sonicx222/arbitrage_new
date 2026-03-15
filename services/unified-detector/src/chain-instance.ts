@@ -586,6 +586,16 @@ export class ChainDetectorInstance extends EventEmitter {
             break;
           }
         }
+        // DET-P2-3 FIX: Hard cap prevents unbounded growth if all entries are fresh.
+        const MAX_SIGNAL_CACHE_SIZE = 10_000;
+        if (this.signalCache.size > MAX_SIGNAL_CACHE_SIZE) {
+          const excess = this.signalCache.size - MAX_SIGNAL_CACHE_SIZE;
+          const iter = this.signalCache.keys();
+          for (let i = 0; i < excess; i++) {
+            const k = iter.next().value;
+            if (k !== undefined) this.signalCache.delete(k);
+          }
+        }
       } catch (error) {
         this.logger.debug('Signal pre-computation cycle error', { error: getErrorMessage(error) });
       }

@@ -17,6 +17,11 @@ import { CoordinatorService, CoordinatorDependencies } from '../../src/coordinat
 import { RedisStreamsClient, RedisClient } from '@arbitrage/core/redis';
 import { ServiceStateManager, createServiceState } from '@arbitrage/core/service-lifecycle';
 import { createTestRedisClient, createMockLogger, createMockPerfLogger } from '@arbitrage/test-utils';
+import {
+  handleSwapEventMessage,
+  handleVolumeAggregateMessage,
+  type StreamHandlerDeps,
+} from '../../src/streaming/stream-handlers';
 import Redis from 'ioredis';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -494,6 +499,19 @@ describe('CoordinatorService Integration', () => {
   });
 
   // ===========================================================================
+  // Helper: build StreamHandlerDeps from coordinator instance
+  // ===========================================================================
+
+  function buildHandlerDeps(coord: CoordinatorService): StreamHandlerDeps {
+    return {
+      logger: (coord as any).logger,
+      systemMetrics: (coord as any).systemMetrics,
+      sendAlert: (coord as any).sendAlert?.bind(coord) ?? jest.fn(),
+      trackActivePair: (coord as any).trackActivePair.bind(coord),
+    };
+  }
+
+  // ===========================================================================
   // Error Handling Tests
   // ===========================================================================
 
@@ -525,7 +543,7 @@ describe('CoordinatorService Integration', () => {
     it('should handle swap event messages correctly', async () => {
       await coordinator.start(0);
 
-      const handler = (coordinator as any).handleSwapEventMessage.bind(coordinator);
+      const handler = (msg: any) => handleSwapEventMessage(msg, buildHandlerDeps(coordinator));
 
       // Valid swap event message (wrapped in MessageEvent format)
       const validMessage = {
@@ -560,7 +578,7 @@ describe('CoordinatorService Integration', () => {
     it('should handle volume aggregate messages correctly', async () => {
       await coordinator.start(0);
 
-      const handler = (coordinator as any).handleVolumeAggregateMessage.bind(coordinator);
+      const handler = (msg: any) => handleVolumeAggregateMessage(msg, buildHandlerDeps(coordinator));
 
       // Valid volume aggregate message (wrapped in MessageEvent format)
       const validMessage = {
@@ -617,7 +635,7 @@ describe('CoordinatorService Integration', () => {
     it('should guard against negative usdValue in swap events', async () => {
       await coordinator.start(0);
 
-      const handler = (coordinator as any).handleSwapEventMessage.bind(coordinator);
+      const handler = (msg: any) => handleSwapEventMessage(msg, buildHandlerDeps(coordinator));
 
       // Malformed message with negative usdValue should not corrupt metrics
       const malformedMessage = {
@@ -643,7 +661,7 @@ describe('CoordinatorService Integration', () => {
     it('should guard against negative totalUsdVolume in volume aggregates', async () => {
       await coordinator.start(0);
 
-      const handler = (coordinator as any).handleVolumeAggregateMessage.bind(coordinator);
+      const handler = (msg: any) => handleVolumeAggregateMessage(msg, buildHandlerDeps(coordinator));
 
       // Malformed message with negative totalUsdVolume
       const malformedMessage = {
@@ -668,7 +686,7 @@ describe('CoordinatorService Integration', () => {
     it('should track pairs as active even with swapCount=0', async () => {
       await coordinator.start(0);
 
-      const handler = (coordinator as any).handleVolumeAggregateMessage.bind(coordinator);
+      const handler = (msg: any) => handleVolumeAggregateMessage(msg, buildHandlerDeps(coordinator));
 
       // Volume aggregate with zero swaps (quiet window for monitored pair)
       const quietWindowMessage = {
@@ -717,24 +735,24 @@ describe('CoordinatorService Integration', () => {
       expect(coordinator.getIsLeader()).toBe(true);
     });
 
-    it('should return defensive copy of health map', async () => {
+    it('should return live reference to health map (Readonly type safety)', async () => {
       await coordinator.start(0);
 
       const map1 = coordinator.getServiceHealthMap();
       const map2 = coordinator.getServiceHealthMap();
 
-      // Should be different instances
-      expect(map1).not.toBe(map2);
+      // Returns live reference for hot-path performance; Readonly<> provides compile-time safety
+      expect(map1).toBe(map2);
     });
 
-    it('should return defensive copy of metrics', async () => {
+    it('should return live reference to metrics (Readonly type safety)', async () => {
       await coordinator.start(0);
 
       const metrics1 = coordinator.getSystemMetrics();
       const metrics2 = coordinator.getSystemMetrics();
 
-      // Should be different instances
-      expect(metrics1).not.toBe(metrics2);
+      // Returns live reference for hot-path performance; Readonly<> provides compile-time safety
+      expect(metrics1).toBe(metrics2);
     });
   });
 

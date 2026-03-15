@@ -542,6 +542,195 @@ describe('RedisRateLimitStore', () => {
   // Prefix isolation
   // ---------------------------------------------------------------------------
 
+  // ---------------------------------------------------------------------------
+  // Circuit breaker (P1-5 FIX: previously untested)
+  // ---------------------------------------------------------------------------
+
+  describe('circuit breaker', () => {
+    it('should stay closed when failures are below threshold', async () => {
+      // 4 failures (threshold is 5)
+      for (let i = 0; i < 4; i++) {
+        mockRedis.eval.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+        await store.increment('key');
+      }
+
+      // 5th call should still attempt Redis (circuit not yet open)
+      mockRedis.eval.mockResolvedValueOnce(1);
+      mockRedis.pttl.mockResolvedValueOnce(60_000);
+      const result = await store.increment('key');
+
+      expect(result.totalHits).toBe(1);
+    });
+
+    it('should open after 5 consecutive failures', async () => {
+      // Trigger 5 failures to open circuit
+      for (let i = 0; i < 5; i++) {
+        mockRedis.eval.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+        await store.increment('key');
+      }
+
+      // 6th call should short-circuit without touching Redis
+      mockRedis.eval.mockClear();
+      const result = await store.increment('key');
+
+      expect(result.totalHits).toBe(Infinity);
+      expect(mockRedis.eval).not.toHaveBeenCalled();
+    });
+
+    it('should return Infinity from increment() when circuit is open', async () => {
+      for (let i = 0; i < 5; i++) {
+        mockRedis.eval.mockRejectedValueOnce(new Error('down'));
+        await store.increment('key');
+      }
+
+      const result = await store.increment('blocked');
+      expect(result.totalHits).toBe(Infinity);
+      expect(result.resetTime).toBeInstanceOf(Date);
+    });
+
+    it('should return fail-closed from get() when circuit is open', async () => {
+      for (let i = 0; i < 5; i++) {
+        mockRedis.eval.mockRejectedValueOnce(new Error('down'));
+        await store.increment('key');
+      }
+
+      mockRedis.get.mockClear();
+      const result = await store.get('blocked');
+      expect(result).toBeDefined();
+      expect(result!.totalHits).toBe(Infinity);
+      expect(result!.resetTime).toBeInstanceOf(Date);
+      expect(mockRedis.get).not.toHaveBeenCalled();
+    });
+
+    it('should skip Redis on decrement() when circuit is open', async () => {
+      for (let i = 0; i < 5; i++) {
+        mockRedis.eval.mockRejectedValueOnce(new Error('down'));
+        await store.increment('key');
+      }
+
+      mockRedis.decr.mockClear();
+      await store.decrement('key');
+      expect(mockRedis.decr).not.toHaveBeenCalled();
+    });
+
+    it('should skip Redis on resetKey() when circuit is open', async () => {
+      for (let i = 0; i < 5; i++) {
+        mockRedis.eval.mockRejectedValueOnce(new Error('down'));
+        await store.increment('key');
+      }
+
+      mockRedis.del.mockClear();
+      await store.resetKey('key');
+      expect(mockRedis.del).not.toHaveBeenCalled();
+    });
+
+    it('should skip Redis on resetAll() when circuit is open', async () => {
+      for (let i = 0; i < 5; i++) {
+        mockRedis.eval.mockRejectedValueOnce(new Error('down'));
+        await store.increment('key');
+      }
+
+      mockRedis.scan.mockClear();
+      await store.resetAll();
+      expect(mockRedis.scan).not.toHaveBeenCalled();
+    });
+
+    it('should allow a half-open probe after cooldown expires', async () => {
+      // Open circuit
+      for (let i = 0; i < 5; i++) {
+        mockRedis.eval.mockRejectedValueOnce(new Error('down'));
+        await store.increment('key');
+      }
+
+      // Advance time past cooldown (10s)
+      jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 11_000);
+
+      // Next call should attempt Redis (half-open probe)
+      mockRedis.eval.mockResolvedValueOnce(1);
+      mockRedis.pttl.mockResolvedValueOnce(60_000);
+      const result = await store.increment('probe');
+
+      expect(result.totalHits).toBe(1);
+      expect(mockRedis.eval).toHaveBeenCalled();
+
+      jest.restoreAllMocks();
+    });
+
+    it('should close circuit after successful probe', async () => {
+      const realNow = Date.now();
+
+      // Open circuit
+      for (let i = 0; i < 5; i++) {
+        mockRedis.eval.mockRejectedValueOnce(new Error('down'));
+        await store.increment('key');
+      }
+
+      // Advance time past cooldown
+      const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(realNow + 11_000);
+
+      // Successful probe
+      mockRedis.eval.mockResolvedValueOnce(1);
+      mockRedis.pttl.mockResolvedValueOnce(60_000);
+      await store.increment('probe');
+
+      // Restore time
+      nowSpy.mockReturnValue(realNow + 11_100);
+
+      // Subsequent call should also succeed (circuit is now closed)
+      mockRedis.eval.mockResolvedValueOnce(2);
+      mockRedis.pttl.mockResolvedValueOnce(59_000);
+      const result = await store.increment('normal');
+
+      expect(result.totalHits).toBe(2);
+
+      nowSpy.mockRestore();
+    });
+
+    it('should log warning when circuit opens', async () => {
+      for (let i = 0; i < 5; i++) {
+        mockRedis.eval.mockRejectedValueOnce(new Error('down'));
+        await store.increment('key');
+      }
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Circuit breaker OPEN — short-circuiting to fail-closed',
+        expect.objectContaining({
+          failures: 5,
+          cooldownMs: 10_000,
+        })
+      );
+    });
+
+    it('should reset failure count on successful operation', async () => {
+      // 4 failures (just below threshold)
+      for (let i = 0; i < 4; i++) {
+        mockRedis.eval.mockRejectedValueOnce(new Error('down'));
+        await store.increment('key');
+      }
+
+      // Successful operation resets counter
+      mockRedis.eval.mockResolvedValueOnce(1);
+      mockRedis.pttl.mockResolvedValueOnce(60_000);
+      await store.increment('key');
+
+      // 4 more failures should NOT open circuit (counter was reset)
+      for (let i = 0; i < 4; i++) {
+        mockRedis.eval.mockRejectedValueOnce(new Error('down'));
+        await store.increment('key');
+      }
+
+      // Should still attempt Redis (only 4 failures since reset)
+      mockRedis.eval.mockResolvedValueOnce(5);
+      mockRedis.pttl.mockResolvedValueOnce(60_000);
+      const result = await store.increment('key');
+      expect(result.totalHits).toBe(5);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Prefix isolation
+  // ---------------------------------------------------------------------------
+
   describe('prefix isolation', () => {
     it('should prepend prefix to all key operations', async () => {
       const key = '192.168.1.1';

@@ -639,6 +639,13 @@ export class ExecutionEngineService {
       });
       this.cbManager.initialize();
 
+      // P1-6 FIX: Restore persisted circuit breaker states from Redis stream.
+      // Without this, all CBs start CLOSED after restart, even if a chain was tripping.
+      const restoredCBs = await this.cbManager.restorePersistedState();
+      if (restoredCBs > 0) {
+        this.logger.info('Restored circuit breaker states from stream', { restoredCount: restoredCBs });
+      }
+
       // Task 2.3: Validate trade log directory and start lifecycle maintenance
       if (this.tradeLogger) {
         await this.tradeLogger.validateLogDir();

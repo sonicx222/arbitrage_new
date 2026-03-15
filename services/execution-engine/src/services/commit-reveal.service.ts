@@ -23,6 +23,7 @@ import { randomBytes } from 'crypto';
 import { ethers } from 'ethers';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import { getErrorMessage } from '@arbitrage/core/resilience';
+import { getNativeTokenPrice } from '@arbitrage/config';
 import type { Logger, StrategyContext } from '../types';
 import type { Redis } from 'ioredis';
 
@@ -912,12 +913,12 @@ export class CommitRevealService {
    *   The expectedProfit from commit-time is used as-is.
    * - Falls back to true (proceed) if gas estimation fails, since the on-chain
    *   contract still enforces minProfit as a safety net.
-   * - Assumes expectedProfit is denominated in the chain's native token (ETH/BNB/etc).
-   *   If expectedProfit is in USD or other units, the parseEther comparison will be
-   *   overly generous (large values always pass). The on-chain minProfit (in wei)
-   *   provides the authoritative check in that case.
    *
-   * @param state - Stored commitment state with params and expectedProfit
+   * EE-P2-3 FIX: Converts gas cost to USD for apples-to-apples comparison with
+   * expectedProfit (which is in USD from ArbitrageOpportunity). Previous code used
+   * parseEther which treated USD as ETH, making the check overly generous.
+   *
+   * @param state - Stored commitment state with params and expectedProfit (USD)
    * @param chain - Chain identifier for provider/gas lookup
    * @param ctx - Strategy context with providers, gas baselines, etc.
    * @returns true if reveal should proceed, false if unprofitable
@@ -969,22 +970,26 @@ export class CommitRevealService {
       const estimatedGasUnits = 500_000n;
       const estimatedGasCostWei = gasPrice * estimatedGasUnits;
 
-      // Convert expectedProfit (denominated in ETH as a float) to wei for comparison
-      const expectedProfitWei = ethers.parseEther(state.expectedProfit.toString());
+      // EE-P2-3 FIX: Compare in USD. expectedProfit is in USD (from ArbitrageOpportunity).
+      // Convert gas cost: wei → ETH → USD using native token price.
+      const nativeTokenPrice = getNativeTokenPrice(chain, { suppressWarning: true });
+      const gasCostEth = parseFloat(ethers.formatEther(estimatedGasCostWei));
+      const gasCostUsd = gasCostEth * nativeTokenPrice;
 
-      // The reveal is unprofitable if gas cost exceeds expected profit
-      // Use a 1.2x gas cost buffer to account for execution variance
-      const gasCostWithBuffer = (estimatedGasCostWei * 120n) / 100n;
+      // 1.2x buffer to account for execution variance
+      const gasCostUsdWithBuffer = gasCostUsd * 1.2;
+      const expectedProfitUsd = state.expectedProfit;
 
-      if (expectedProfitWei <= gasCostWithBuffer) {
+      if (expectedProfitUsd <= gasCostUsdWithBuffer) {
         // Fix #11: Downgrade to debug — detailed gas numbers are diagnostic.
         // The canonical abort event at the caller (line 381) remains logger.warn.
         this.logger.debug('Reveal unprofitable after gas cost estimation', {
           chain,
-          expectedProfitWei: expectedProfitWei.toString(),
-          estimatedGasCostWei: estimatedGasCostWei.toString(),
-          gasCostWithBuffer: gasCostWithBuffer.toString(),
+          expectedProfitUsd,
+          gasCostUsd,
+          gasCostUsdWithBuffer,
           gasPrice: gasPrice.toString(),
+          nativeTokenPrice,
           minProfit: state.params.minProfit.toString(),
         });
         return false;
@@ -992,9 +997,9 @@ export class CommitRevealService {
 
       this.logger.debug('Profitability validation passed', {
         chain,
-        expectedProfitWei: expectedProfitWei.toString(),
-        estimatedGasCostWei: estimatedGasCostWei.toString(),
-        marginWei: (expectedProfitWei - gasCostWithBuffer).toString(),
+        expectedProfitUsd,
+        gasCostUsd,
+        marginUsd: expectedProfitUsd - gasCostUsdWithBuffer,
       });
       return true;
     } catch (error) {

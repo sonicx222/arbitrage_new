@@ -16,7 +16,7 @@ import { createHealthRoutes } from './health.routes';
 import { createMetricsRoutes } from './metrics.routes';
 import { createDashboardRoutes } from './dashboard.routes';
 import { createAdminRoutes } from './admin.routes';
-import { createSSERoutes } from './sse.routes';
+import { createSSERoutes, getActiveSSEConnections } from './sse.routes';
 
 // Re-export individual route factories
 export { createHealthRoutes } from './health.routes';
@@ -46,11 +46,16 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
   // FIX: GCP probes /ready (not /health/ready). Add explicit /ready alias at root
   // so coordinator-standby.yaml readinessProbe gets 200 instead of 404.
   // H-01 FIX: Aligned with health.routes.ts — includes Redis connectivity check.
+  // P1-1 FIX: Added consumersOk check to match /api/health/ready (was missing,
+  // causing a coordinator with zero stream consumers to report "ready" here
+  // but "not_ready" on /api/health/ready).
   app.get('/ready', (async (_req: Request, res: Response) => {
     const isRunning = state.getIsRunning();
     const systemHealth = state.getSystemMetrics().systemHealth;
     const redisOk = await state.checkRedisConnectivity();
-    const isReady = isRunning && systemHealth > 0 && redisOk;
+    const streamConsumers = state.getActiveStreamConsumerCount();
+    const consumersOk = streamConsumers > 0;
+    const isReady = isRunning && systemHealth > 0 && redisOk && consumersOk;
 
     const statusCode = isReady ? 200 : 503;
     res.status(statusCode).json({
@@ -58,6 +63,8 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
       isRunning,
       systemHealth,
       redisConnected: redisOk,
+      streamConsumers,
+      consumersOk,
       timestamp: Date.now(),
     });
   }) as RequestHandler);
@@ -75,7 +82,9 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
       const runtimeMetrics = getRuntimeMonitor().getPrometheusMetrics();
       const providerMetrics = getProviderLatencyTracker().getPrometheusMetrics();
       const sys = state.getSystemMetrics();
-      const coordinatorMetrics = [
+      // P1-2 FIX: Aligned with /api/metrics/prometheus — added forwarding, DLQ,
+      // SSE, leader, and notification metrics that were previously missing.
+      const lines: string[] = [
         '# HELP arbitrage_opportunities_dropped_total Total opportunities dropped (all reasons)',
         '# TYPE arbitrage_opportunities_dropped_total counter',
         `arbitrage_opportunities_dropped_total ${sys.opportunitiesDropped}`,
@@ -103,8 +112,62 @@ export function setupAllRoutes(app: Application, state: CoordinatorStateProvider
         '# HELP pipeline_events_total Total pipeline events processed by coordinator',
         '# TYPE pipeline_events_total counter',
         `pipeline_events_total ${sys.totalOpportunities + sys.totalExecutions}`,
-        '',
-      ].join('\n');
+        '# HELP arbitrage_alert_notifications_dropped_total Alert notifications dropped (notifier failures)',
+        '# TYPE arbitrage_alert_notifications_dropped_total counter',
+        `arbitrage_alert_notifications_dropped_total ${sys.notificationDroppedAlerts ?? 0}`,
+        '# HELP arbitrage_sse_connections_active Current active SSE connections',
+        '# TYPE arbitrage_sse_connections_active gauge',
+        `arbitrage_sse_connections_active ${getActiveSSEConnections()}`,
+        '# HELP arbitrage_coordinator_is_leader Whether this coordinator instance is the leader',
+        '# TYPE arbitrage_coordinator_is_leader gauge',
+        `arbitrage_coordinator_is_leader ${state.getIsLeader() ? 1 : 0}`,
+      ];
+      if (sys.forwardingMetrics) {
+        lines.push(
+          '# HELP arbitrage_forwarding_expired_total Opportunities rejected (expired)',
+          '# TYPE arbitrage_forwarding_expired_total counter',
+          `arbitrage_forwarding_expired_total ${sys.forwardingMetrics.expired}`,
+          '# HELP arbitrage_forwarding_duplicate_total Opportunities rejected (duplicate)',
+          '# TYPE arbitrage_forwarding_duplicate_total counter',
+          `arbitrage_forwarding_duplicate_total ${sys.forwardingMetrics.duplicate}`,
+          '# HELP arbitrage_forwarding_profit_rejected_total Opportunities rejected (profit below threshold)',
+          '# TYPE arbitrage_forwarding_profit_rejected_total counter',
+          `arbitrage_forwarding_profit_rejected_total ${sys.forwardingMetrics.profitRejected}`,
+          '# HELP arbitrage_forwarding_chain_rejected_total Opportunities rejected (unsupported chain)',
+          '# TYPE arbitrage_forwarding_chain_rejected_total counter',
+          `arbitrage_forwarding_chain_rejected_total ${sys.forwardingMetrics.chainRejected}`,
+          '# HELP arbitrage_forwarding_grace_period_deferred_total Opportunities deferred (startup grace period)',
+          '# TYPE arbitrage_forwarding_grace_period_deferred_total counter',
+          `arbitrage_forwarding_grace_period_deferred_total ${sys.forwardingMetrics.gracePeriodDeferred}`,
+          '# HELP arbitrage_forwarding_not_leader_total Opportunities rejected (not leader)',
+          '# TYPE arbitrage_forwarding_not_leader_total counter',
+          `arbitrage_forwarding_not_leader_total ${sys.forwardingMetrics.notLeader}`,
+          '# HELP arbitrage_forwarding_circuit_open_total Opportunities rejected (circuit breaker open)',
+          '# TYPE arbitrage_forwarding_circuit_open_total counter',
+          `arbitrage_forwarding_circuit_open_total ${sys.forwardingMetrics.circuitOpen}`,
+        );
+      }
+      if (sys.dlqMetrics) {
+        lines.push(
+          '# HELP arbitrage_dlq_total Total messages sent to dead letter queue',
+          '# TYPE arbitrage_dlq_total counter',
+          `arbitrage_dlq_total ${sys.dlqMetrics.total}`,
+          '# HELP arbitrage_dlq_expired_total DLQ messages (expired TTL)',
+          '# TYPE arbitrage_dlq_expired_total counter',
+          `arbitrage_dlq_expired_total ${sys.dlqMetrics.expired}`,
+          '# HELP arbitrage_dlq_validation_total DLQ messages (validation failure)',
+          '# TYPE arbitrage_dlq_validation_total counter',
+          `arbitrage_dlq_validation_total ${sys.dlqMetrics.validation}`,
+          '# HELP arbitrage_dlq_transient_total DLQ messages (transient error)',
+          '# TYPE arbitrage_dlq_transient_total counter',
+          `arbitrage_dlq_transient_total ${sys.dlqMetrics.transient}`,
+          '# HELP arbitrage_dlq_unknown_total DLQ messages (unknown category)',
+          '# TYPE arbitrage_dlq_unknown_total counter',
+          `arbitrage_dlq_unknown_total ${sys.dlqMetrics.unknown}`,
+        );
+      }
+      lines.push('');
+      const coordinatorMetrics = lines.join('\n');
       res.type('text/plain; version=0.0.4; charset=utf-8').send(streamMetrics + runtimeMetrics + providerMetrics + coordinatorMetrics);
     } catch (error) {
       state.getLogger().error('Failed to get Prometheus metrics', { error: (error as Error).message });

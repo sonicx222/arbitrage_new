@@ -90,6 +90,7 @@ describe('ChainInstanceManager', () => {
     mockDegradationManager = {
       triggerDegradation: jest.fn(),
       registerCapabilities: jest.fn(),
+      forceRecovery: jest.fn().mockResolvedValue(undefined),
     };
   });
 
@@ -488,6 +489,330 @@ describe('ChainInstanceManager', () => {
 
       const instance = manager.getChainInstance('polygon');
       expect(instance).toBeUndefined();
+    });
+  });
+
+  // ===========================================================================
+  // Degradation Integration
+  // ===========================================================================
+
+  // ===========================================================================
+  // Health Watchdog (P1-7 coverage — ADR-043 Phase 2)
+  // ===========================================================================
+
+  describe('health watchdog', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    function createManagerWithErrorChain(
+      chains: string[],
+      errorChains: string[],
+      overrides?: Partial<ChainInstanceManagerConfig>,
+    ) {
+      const instances = new Map<string, MockChainInstance>();
+      const mockFactory: ChainInstanceFactory = jest.fn().mockImplementation((cfg: any) => {
+        const shouldFail = errorChains.includes(cfg.chainId);
+        const instance = createMockChainInstance(cfg.chainId, shouldFail);
+        instances.set(cfg.chainId, instance);
+        return instance as any;
+      });
+
+      const manager = createChainInstanceManager({
+        chains,
+        partitionId: 'test-partition',
+        streamsClient: mockStreamsClient as any,
+        perfLogger: mockPerfLogger as any,
+        chainInstanceFactory: mockFactory,
+        logger: logger as any,
+        degradationManager: mockDegradationManager as any,
+        ...overrides,
+        chainInstanceFactory: mockFactory,
+      } as any);
+
+      return { manager, instances };
+    }
+
+    it('should restart chains in error state on watchdog tick', async () => {
+      const { manager, instances } = createManagerWithErrorChain(
+        ['ethereum', 'polygon'],
+        [], // start healthy
+      );
+
+      await manager.startAll();
+
+      // Simulate ethereum going into error state
+      const ethInstance = instances.get('ethereum')!;
+      ethInstance.getStats.mockReturnValue({
+        chainId: 'ethereum',
+        status: 'error',
+        eventsProcessed: 0,
+        opportunitiesFound: 0,
+        lastBlockNumber: 0,
+        avgBlockLatencyMs: 0,
+        pairsMonitored: 0,
+      });
+      ethInstance.isConnected.mockReturnValue(true); // restart succeeds
+
+      const restartedHandler = jest.fn();
+      manager.on('chainRestarted', restartedHandler);
+
+      // Advance past watchdog interval (default 30s)
+      await jest.advanceTimersByTimeAsync(31000);
+
+      expect(ethInstance.stop).toHaveBeenCalled();
+      expect(ethInstance.start).toHaveBeenCalledTimes(2); // initial + restart
+      expect(restartedHandler).toHaveBeenCalledWith(
+        expect.objectContaining({ chainId: 'ethereum', attempt: 1 }),
+      );
+    });
+
+    it('should not restart chains in connected state', async () => {
+      const { manager, instances } = createManagerWithErrorChain(
+        ['ethereum'],
+        [],
+      );
+
+      await manager.startAll();
+      const ethInstance = instances.get('ethereum')!;
+
+      // Advance past watchdog interval
+      await jest.advanceTimersByTimeAsync(31000);
+
+      // start called only once (initial), no restart
+      expect(ethInstance.start).toHaveBeenCalledTimes(1);
+    });
+
+    it('should respect max restart limit', async () => {
+      const { manager, instances } = createManagerWithErrorChain(
+        ['ethereum'],
+        [],
+      );
+
+      await manager.startAll();
+
+      const ethInstance = instances.get('ethereum')!;
+      ethInstance.getStats.mockReturnValue({
+        chainId: 'ethereum',
+        status: 'error',
+        eventsProcessed: 0,
+        opportunitiesFound: 0,
+        lastBlockNumber: 0,
+        avgBlockLatencyMs: 0,
+        pairsMonitored: 0,
+      });
+      // Restart succeeds but chain keeps going back to error
+      ethInstance.isConnected.mockReturnValue(true);
+
+      const exhaustedHandler = jest.fn();
+      manager.on('chainRestartExhausted', exhaustedHandler);
+
+      // Default max restarts = 5, cooldown = 120s
+      // Advance enough to trigger 6 attempts (past max)
+      for (let i = 0; i < 7; i++) {
+        await jest.advanceTimersByTimeAsync(121000); // past cooldown
+      }
+
+      // Should have been called at most 5 times (max restarts)
+      // start: 1 (initial) + 5 (restarts) = 6
+      expect(ethInstance.start.mock.calls.length).toBeLessThanOrEqual(6);
+    });
+
+    it('should respect cooldown between restart attempts', async () => {
+      const { manager, instances } = createManagerWithErrorChain(
+        ['ethereum'],
+        [],
+      );
+
+      await manager.startAll();
+
+      const ethInstance = instances.get('ethereum')!;
+      ethInstance.getStats.mockReturnValue({
+        chainId: 'ethereum',
+        status: 'error',
+        eventsProcessed: 0,
+        opportunitiesFound: 0,
+        lastBlockNumber: 0,
+        avgBlockLatencyMs: 0,
+        pairsMonitored: 0,
+      });
+      ethInstance.isConnected.mockReturnValue(true);
+
+      // Trigger first watchdog tick (30s)
+      await jest.advanceTimersByTimeAsync(31000);
+      expect(ethInstance.start).toHaveBeenCalledTimes(2); // initial + 1 restart
+
+      // Trigger second tick (30s more = 61s total) — within cooldown (120s)
+      await jest.advanceTimersByTimeAsync(31000);
+      expect(ethInstance.start).toHaveBeenCalledTimes(2); // no additional restart
+
+      // Advance past cooldown (need ~90s more to reach 120s from first restart)
+      await jest.advanceTimersByTimeAsync(90000);
+      expect(ethInstance.start).toHaveBeenCalledTimes(3); // second restart now allowed
+    });
+
+    it('should emit chainRestartFailed when restart does not connect', async () => {
+      const { manager, instances } = createManagerWithErrorChain(
+        ['ethereum'],
+        [],
+      );
+
+      await manager.startAll();
+
+      const ethInstance = instances.get('ethereum')!;
+      ethInstance.getStats.mockReturnValue({
+        chainId: 'ethereum',
+        status: 'disconnected',
+        eventsProcessed: 0,
+        opportunitiesFound: 0,
+        lastBlockNumber: 0,
+        avgBlockLatencyMs: 0,
+        pairsMonitored: 0,
+      });
+      ethInstance.isConnected.mockReturnValue(false); // restart doesn't help
+
+      const failedHandler = jest.fn();
+      manager.on('chainRestartFailed', failedHandler);
+
+      await jest.advanceTimersByTimeAsync(31000);
+
+      expect(failedHandler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chainId: 'ethereum',
+          attempt: 1,
+          reason: 'not_connected',
+        }),
+      );
+    });
+
+    it('should emit chainRestartFailed when restart throws', async () => {
+      const { manager, instances } = createManagerWithErrorChain(
+        ['ethereum'],
+        [],
+      );
+
+      await manager.startAll();
+
+      const ethInstance = instances.get('ethereum')!;
+      ethInstance.getStats.mockReturnValue({
+        chainId: 'ethereum',
+        status: 'error',
+        eventsProcessed: 0,
+        opportunitiesFound: 0,
+        lastBlockNumber: 0,
+        avgBlockLatencyMs: 0,
+        pairsMonitored: 0,
+      });
+      ethInstance.start.mockRejectedValueOnce(new Error('RPC down'));
+
+      const failedHandler = jest.fn();
+      manager.on('chainRestartFailed', failedHandler);
+
+      await jest.advanceTimersByTimeAsync(31000);
+
+      expect(failedHandler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chainId: 'ethereum',
+          attempt: 1,
+          reason: 'RPC down',
+        }),
+      );
+    });
+
+    it('should clear degradation state on recovery (statusChange to connected)', async () => {
+      const { manager, instances } = createManagerWithErrorChain(
+        ['ethereum'],
+        [],
+      );
+
+      await manager.startAll();
+
+      const ethInstance = instances.get('ethereum')!;
+
+      // Trigger error to set degraded state
+      ethInstance.emit('error', new Error('Connection lost'));
+
+      // Verify degraded
+      let summary = manager.getChainHealthSummary();
+      expect(summary[0].isDegraded).toBe(true);
+
+      // Emit recovery
+      const recoveredHandler = jest.fn();
+      manager.on('chainRecovered', recoveredHandler);
+      ethInstance.emit('statusChange', 'connected');
+
+      // Verify cleared
+      summary = manager.getChainHealthSummary();
+      expect(summary[0].isDegraded).toBe(false);
+      expect(recoveredHandler).toHaveBeenCalledWith(
+        expect.objectContaining({ chainId: 'ethereum' }),
+      );
+    });
+
+    it('should report health summary with restart attempts and degradation', async () => {
+      const { manager, instances } = createManagerWithErrorChain(
+        ['ethereum', 'polygon'],
+        [],
+      );
+
+      await manager.startAll();
+
+      // Trigger error on ethereum
+      instances.get('ethereum')!.emit('error', new Error('Timeout'));
+      instances.get('ethereum')!.getStats.mockReturnValue({
+        chainId: 'ethereum',
+        status: 'error',
+        eventsProcessed: 0,
+        opportunitiesFound: 0,
+        lastBlockNumber: 0,
+        avgBlockLatencyMs: 0,
+        pairsMonitored: 0,
+      });
+      instances.get('ethereum')!.isConnected.mockReturnValue(true);
+
+      // Let watchdog restart once
+      await jest.advanceTimersByTimeAsync(31000);
+
+      const summary = manager.getChainHealthSummary();
+      const ethSummary = summary.find(s => s.chainId === 'ethereum')!;
+      const polySummary = summary.find(s => s.chainId === 'polygon')!;
+
+      expect(ethSummary.restartAttempts).toBe(1);
+      expect(ethSummary.lastRestartAttempt).toBeGreaterThan(0);
+      expect(ethSummary.isDegraded).toBe(true);
+      expect(polySummary.restartAttempts).toBe(0);
+      expect(polySummary.isDegraded).toBe(false);
+    });
+
+    it('should stop watchdog on manager stop', async () => {
+      const { manager, instances } = createManagerWithErrorChain(
+        ['ethereum'],
+        [],
+      );
+
+      await manager.startAll();
+
+      const ethInstance = instances.get('ethereum')!;
+      ethInstance.getStats.mockReturnValue({
+        chainId: 'ethereum',
+        status: 'error',
+        eventsProcessed: 0,
+        opportunitiesFound: 0,
+        lastBlockNumber: 0,
+        avgBlockLatencyMs: 0,
+        pairsMonitored: 0,
+      });
+
+      await manager.stop();
+
+      // Advance timers after stop — no restart should occur
+      const startCallsBefore = ethInstance.start.mock.calls.length;
+      await jest.advanceTimersByTimeAsync(31000);
+      expect(ethInstance.start.mock.calls.length).toBe(startCallsBefore);
     });
   });
 

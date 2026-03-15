@@ -504,10 +504,10 @@ export class ExecutionPipeline {
     }
 
     // Phase 1 Enhanced Monitoring: Stamp execution start.
-    // L-006 FIX: Use a local copy instead of mutating the opportunity object.
-    // OPT-006: Direct property assignment instead of spread copy.
-    const base = opportunity.pipelineTimestamps ?? {};
-    const ts = Object.assign({}, base, { executionStartedAt: Date.now() });
+    // P2-8 FIX: Eliminated Object.assign allocation — ts was only read for
+    // detectedAt (from original) and executionStartedAt (value we just set).
+    // Saves one object allocation per opportunity in the hot path.
+    const executionStartedAt = Date.now();
 
     // Same-chain arbitrage opportunities set 'chain' but not 'buyChain'.
     // Fall back to 'chain' for same-chain arbs; only cross-chain arbs need buyChain explicitly.
@@ -549,9 +549,9 @@ export class ExecutionPipeline {
     }
 
     // Phase 3 (A4): Record opportunity age at execution start
-    const detectedAt = ts.detectedAt;
+    const detectedAt = opportunity.pipelineTimestamps?.detectedAt;
     if (detectedAt) {
-      const ageMs = (ts.executionStartedAt ?? Date.now()) - detectedAt;
+      const ageMs = executionStartedAt - detectedAt;
       if (ageMs >= 0 && Number.isFinite(ageMs)) {
         recordOpportunityAge(chain, ageMs);
       }

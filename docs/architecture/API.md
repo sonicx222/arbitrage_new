@@ -269,15 +269,17 @@ Returns stream health metrics in Prometheus text exposition format (`text/plain;
 
 **Auth:** `DASHBOARD_AUTH_TOKEN` via query parameter (`?token=<token>`). Uses `crypto.timingSafeEqual` for timing-safe comparison.
 
-Server-Sent Events endpoint that streams real-time system data to the dashboard. The coordinator emits 7 event types at different intervals:
+Server-Sent Events endpoint that streams real-time system data to the dashboard. The coordinator emits 9 event types at different intervals (all timer-based intervals configurable via `SSE_INTERVAL_*_MS` env vars):
 
-| Event | Frequency | Payload |
-|-------|-----------|---------|
-| `metrics` | 2s | `SystemMetrics` — executions, profit, latency, health, pipeline stats |
+| Event | Default Frequency | Payload |
+|-------|-------------------|---------|
+| `metrics` | 5s | `SystemMetrics` — executions, profit, latency, health, pipeline stats |
 | `services` | 5s | `Record<string, ServiceHealth>` — all service health keyed by name |
 | `circuit-breaker` | 5s | `CircuitBreakerStatus` — state, failures, cooldown |
 | `streams` | 10s | `StreamHealth` — per-stream length, pending, consumer groups |
 | `diagnostics` | 10s | `DiagnosticsSnapshot` — pipeline latency, runtime health, provider quality, stream health |
+| `cex-spread` | 10s | `CexSpreadData` — CEX-DEX spread stats, alerts, health snapshot (or `{ enabled: false }` when CEX signals disabled) |
+| `keepalive` | 15s | SSE comment (`: keepalive`) — prevents proxy/browser timeout disconnects |
 | `execution-result` | On event | `ExecutionResult` — individual trade result (success, profit, chain, tx hash) |
 | `alert` | On event | `Alert` — system alert with type, severity, service, message |
 

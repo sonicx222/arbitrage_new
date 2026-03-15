@@ -454,4 +454,132 @@ describe('GasPriceOptimizer', () => {
       expect(gasBaselines.get('ethereum')!.length).toBe(1);
     });
   });
+
+  // ===========================================================================
+  // Gas Price Prediction (Linear Regression)
+  // ===========================================================================
+
+  describe('predictGasPrice', () => {
+    let dateNowSpy: ReturnType<typeof jest.spyOn>;
+
+    afterEach(() => {
+      dateNowSpy?.mockRestore();
+      optimizer.resetPredictionSamples();
+    });
+
+    function populateSamples(
+      chain: string,
+      prices: bigint[],
+      startTime: number,
+      intervalMs: number,
+    ) {
+      for (let i = 0; i < prices.length; i++) {
+        dateNowSpy.mockReturnValue(startTime + i * intervalMs);
+        optimizer.updateGasBaseline(chain, prices[i], gasBaselines);
+      }
+    }
+
+    it('should return undefined when no samples and no EMA baseline', () => {
+      const result = optimizer.predictGasPrice('ethereum');
+      expect(result).toBeUndefined();
+    });
+
+    it('should fall back to EMA baseline when fewer than 5 samples', () => {
+      const t0 = 1000000;
+      dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(t0);
+
+      // Add 4 samples (below MIN_REGRESSION_SAMPLES = 5)
+      const prices = [50n, 51n, 52n, 53n].map(g => g * WEI_PER_GWEI);
+      populateSamples('ethereum', prices, t0, 1000);
+
+      // predictGasPrice should return the EMA baseline, not a regression
+      dateNowSpy.mockReturnValue(t0 + 5000);
+      const result = optimizer.predictGasPrice('ethereum');
+      const ema = optimizer.getEmaBaseline('ethereum');
+      expect(result).toBe(ema);
+    });
+
+    it('should predict a rising price with upward-trending samples', () => {
+      const t0 = 1000000;
+      dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(t0);
+
+      // Linearly rising: 50, 52, 54, 56, 58, 60 gwei
+      const prices = [50n, 52n, 54n, 56n, 58n, 60n].map(g => g * WEI_PER_GWEI);
+      populateSamples('ethereum', prices, t0, 1000);
+
+      // Predict 2 seconds into the future from the last sample
+      dateNowSpy.mockReturnValue(t0 + 5000); // at last sample time
+      const predicted = optimizer.predictGasPrice('ethereum', 2000);
+      expect(predicted).toBeDefined();
+      // The trend is +2 gwei per 1000ms → in 2000ms should be ~64 gwei
+      const predictedGwei = Number(predicted! / WEI_PER_GWEI);
+      expect(predictedGwei).toBeGreaterThan(60);
+      expect(predictedGwei).toBeLessThan(70);
+    });
+
+    it('should fall back to EMA when all samples have the same timestamp (degenerate denominator)', () => {
+      const t0 = 1000000;
+      dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(t0);
+
+      // All 6 samples at the exact same timestamp
+      for (let i = 0; i < 6; i++) {
+        optimizer.updateGasBaseline('ethereum', 50n * WEI_PER_GWEI, gasBaselines);
+      }
+
+      const result = optimizer.predictGasPrice('ethereum');
+      const ema = optimizer.getEmaBaseline('ethereum');
+      expect(result).toBe(ema);
+    });
+
+    it('should fall back to EMA when regression predicts a negative price', () => {
+      const t0 = 1000000;
+      dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(t0);
+
+      // Sharply declining trend: 50, 40, 30, 20, 10, 1 gwei
+      const prices = [50n, 40n, 30n, 20n, 10n, 1n].map(g => g * WEI_PER_GWEI);
+      populateSamples('ethereum', prices, t0, 1000);
+
+      // Predict far into the future — extrapolation will go negative
+      dateNowSpy.mockReturnValue(t0 + 5000);
+      const result = optimizer.predictGasPrice('ethereum', 10000);
+      const ema = optimizer.getEmaBaseline('ethereum');
+      expect(result).toBe(ema);
+    });
+
+    it('should handle ring buffer wrap-around correctly', () => {
+      const t0 = 1000000;
+      dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(t0);
+
+      // Add 35 samples (exceeds PREDICTION_BUFFER_SIZE = 30) to force wrap-around
+      const prices: bigint[] = [];
+      for (let i = 0; i < 35; i++) {
+        prices.push(BigInt(50 + i) * WEI_PER_GWEI);
+      }
+      populateSamples('ethereum', prices, t0, 1000);
+
+      // Should still predict correctly with the most recent 30 samples
+      dateNowSpy.mockReturnValue(t0 + 35000);
+      const result = optimizer.predictGasPrice('ethereum', 2000);
+      expect(result).toBeDefined();
+      // Trend is +1 gwei/sec → last sample was 84 gwei → predict ~86 gwei
+      const predictedGwei = Number(result! / WEI_PER_GWEI);
+      expect(predictedGwei).toBeGreaterThan(80);
+      expect(predictedGwei).toBeLessThan(95);
+    });
+
+    it('should reset prediction samples via resetPredictionSamples', () => {
+      const t0 = 1000000;
+      dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(t0);
+
+      const prices = [50n, 52n, 54n, 56n, 58n, 60n].map(g => g * WEI_PER_GWEI);
+      populateSamples('ethereum', prices, t0, 1000);
+
+      optimizer.resetPredictionSamples();
+
+      // After reset, should return undefined (no samples, no EMA baseline after reset)
+      optimizer.resetEmaBaselines();
+      const result = optimizer.predictGasPrice('ethereum');
+      expect(result).toBeUndefined();
+    });
+  });
 });

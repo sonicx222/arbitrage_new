@@ -33,7 +33,7 @@ jest.mock('@arbitrage/core/utils', () => ({
 }));
 
 jest.mock('@arbitrage/core/resilience', () => ({
-  getErrorMessage: (e: unknown) => (e instanceof Error ? e.message : String(e)),
+  getErrorMessage: jest.fn((e: unknown) => (e instanceof Error ? e.message : String(e))),
 }));
 
 // =============================================================================
@@ -99,6 +99,25 @@ describe('BridgeRecoveryService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+
+    // Re-apply mock implementations cleared by resetMocks: true in jest.config.base.js
+    const coreUtils = jest.requireMock('@arbitrage/core/utils') as Record<string, jest.Mock>;
+    coreUtils.hmacSign.mockImplementation((data: unknown, _key: string, _context?: string) => ({
+      data,
+      sig: 'mock-hmac-sig',
+      alg: 'sha256',
+    }));
+    coreUtils.hmacVerify.mockImplementation((envelope: { data: unknown }) => envelope.data);
+    coreUtils.getHmacSigningKey.mockReturnValue('mock-signing-key');
+    coreUtils.isSignedEnvelope.mockImplementation((obj: unknown) =>
+      obj !== null && typeof obj === 'object' && 'sig' in (obj as Record<string, unknown>)
+    );
+
+    const coreResilience = jest.requireMock('@arbitrage/core/resilience') as Record<string, jest.Mock>;
+    coreResilience.getErrorMessage.mockImplementation((e: unknown) =>
+      e instanceof Error ? e.message : String(e)
+    );
+
     logger = createMockLogger();
     delegate = createMockDelegate();
     redis = createMockRedis();

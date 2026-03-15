@@ -142,7 +142,12 @@ export class RedisRateLimitStore implements RateLimitStore {
   }
 
   async get(key: string): Promise<{ totalHits: number; resetTime: Date | undefined } | undefined> {
-    if (this.isCircuitOpen()) return undefined;
+    // P1-5 FIX: Fail CLOSED when circuit is open — consistent with increment().
+    // Previously returned undefined, which could be interpreted as "no hits recorded"
+    // by express-rate-limit, effectively bypassing rate limiting during Redis outage.
+    if (this.isCircuitOpen()) {
+      return { totalHits: Infinity, resetTime: new Date(Date.now() + this.windowMs) };
+    }
     try {
       const redis = this.getRedis();
       const [hits, ttl] = await Promise.all([

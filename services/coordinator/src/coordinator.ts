@@ -1528,7 +1528,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
       status: validStatus,
       // M-05 FIX: Partition services send 'uptimeSeconds' (from PartitionHealth type),
       // cross-chain-detector sends 'uptime'. Check both field names.
-      uptime: getNonNegativeNumber(typedData, 'uptime', 0) ?? getNonNegativeNumber(typedData, 'uptimeSeconds', 0),
+      // P1-4 FIX: Use getOptionalNumber for first call — getNonNegativeNumber returns 0
+      // (not null) when field is missing, so ?? would never fall through to the second call.
+      uptime: getOptionalNumber(typedData, 'uptime') ?? getNonNegativeNumber(typedData, 'uptimeSeconds', 0),
       memoryUsage: getNonNegativeNumber(typedData, 'memoryUsage', 0),
       cpuUsage: getNonNegativeNumber(typedData, 'cpuUsage', 0),
       lastHeartbeat: getNumber(typedData, 'timestamp', Date.now()),

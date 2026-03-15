@@ -474,6 +474,221 @@ describe('CircuitBreakerManager', () => {
     });
   });
 
+  // ===========================================================================
+  // restorePersistedState — reads CB events from Redis Streams and restores
+  // OPEN states that are still within the cooldown window
+  // ===========================================================================
+
+  describe('restorePersistedState', () => {
+    it('should return 0 when disabled', async () => {
+      const manager = createManager({
+        config: { ...defaultConfig, enabled: false },
+      });
+      manager.initialize();
+
+      const restored = await manager.restorePersistedState();
+      expect(restored).toBe(0);
+    });
+
+    it('should return 0 when streams client is null', async () => {
+      const manager = createManager({
+        getStreamsClient: () => null,
+      });
+      manager.initialize();
+
+      const restored = await manager.restorePersistedState();
+      expect(restored).toBe(0);
+    });
+
+    it('should return 0 when stream has no messages', async () => {
+      mockStreamsClient.xread = jest.fn().mockResolvedValue([]);
+      const manager = createManager();
+      manager.initialize();
+
+      const restored = await manager.restorePersistedState();
+      expect(restored).toBe(0);
+    });
+
+    it('should return 0 when xread returns null', async () => {
+      mockStreamsClient.xread = jest.fn().mockResolvedValue(null);
+      const manager = createManager();
+      manager.initialize();
+
+      const restored = await manager.restorePersistedState();
+      expect(restored).toBe(0);
+    });
+
+    it('should restore OPEN state within cooldown window', async () => {
+      const now = Date.now();
+      const recentTimestamp = (now - 60000).toString(); // 60s ago, within 300s cooldown
+
+      mockStreamsClient.xread = jest.fn().mockResolvedValue([
+        {
+          id: '1-0',
+          data: {
+            chain: 'ethereum',
+            newState: 'OPEN',
+            reason: 'too many failures',
+            consecutiveFailures: '5',
+            timestamp: recentTimestamp,
+          },
+        },
+      ]);
+
+      const manager = createManager();
+      manager.initialize();
+
+      // Trigger lazy creation so getChainBreaker('ethereum') returns a mock
+      manager.canExecute('ethereum');
+
+      const restored = await manager.restorePersistedState();
+      expect(restored).toBe(1);
+
+      // The breaker's forceOpen should have been called with restoration reason
+      const breaker = (createCircuitBreaker as jest.Mock).mock.results[0].value;
+      expect(breaker.forceOpen).toHaveBeenCalledWith(
+        expect.stringContaining('Restored from restart'),
+      );
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Restored circuit breaker OPEN state from stream',
+        expect.objectContaining({ chain: 'ethereum' }),
+      );
+    });
+
+    it('should skip OPEN state that has expired beyond cooldown', async () => {
+      const now = Date.now();
+      const oldTimestamp = (now - 600000).toString(); // 600s ago, beyond 300s cooldown
+
+      mockStreamsClient.xread = jest.fn().mockResolvedValue([
+        {
+          id: '1-0',
+          data: {
+            chain: 'ethereum',
+            newState: 'OPEN',
+            reason: 'too many failures',
+            consecutiveFailures: '5',
+            timestamp: oldTimestamp,
+          },
+        },
+      ]);
+
+      const manager = createManager();
+      manager.initialize();
+
+      const restored = await manager.restorePersistedState();
+      expect(restored).toBe(0);
+    });
+
+    it('should skip non-OPEN states (CLOSED, HALF_OPEN)', async () => {
+      const now = Date.now();
+      const recentTimestamp = (now - 60000).toString();
+
+      mockStreamsClient.xread = jest.fn().mockResolvedValue([
+        {
+          id: '1-0',
+          data: {
+            chain: 'ethereum',
+            newState: 'CLOSED',
+            reason: 'recovered',
+            consecutiveFailures: '0',
+            timestamp: recentTimestamp,
+          },
+        },
+        {
+          id: '2-0',
+          data: {
+            chain: 'arbitrum',
+            newState: 'HALF_OPEN',
+            reason: 'testing recovery',
+            consecutiveFailures: '3',
+            timestamp: recentTimestamp,
+          },
+        },
+      ]);
+
+      const manager = createManager();
+      manager.initialize();
+
+      const restored = await manager.restorePersistedState();
+      expect(restored).toBe(0);
+    });
+
+    it('should skip entries with invalid (NaN) timestamps', async () => {
+      mockStreamsClient.xread = jest.fn().mockResolvedValue([
+        {
+          id: '1-0',
+          data: {
+            chain: 'ethereum',
+            newState: 'OPEN',
+            reason: 'failures',
+            consecutiveFailures: '5',
+            timestamp: 'not-a-number',
+          },
+        },
+      ]);
+
+      const manager = createManager();
+      manager.initialize();
+
+      const restored = await manager.restorePersistedState();
+      expect(restored).toBe(0);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Invalid circuit breaker state timestamp, skipping restoration',
+        expect.objectContaining({ chain: 'ethereum', timestamp: 'not-a-number' }),
+      );
+    });
+
+    it('should use last-write-wins when multiple events exist for same chain', async () => {
+      const now = Date.now();
+      const recentTimestamp = (now - 60000).toString();
+
+      mockStreamsClient.xread = jest.fn().mockResolvedValue([
+        {
+          id: '1-0',
+          data: {
+            chain: 'ethereum',
+            newState: 'OPEN',
+            reason: 'initial failure',
+            consecutiveFailures: '5',
+            timestamp: recentTimestamp,
+          },
+        },
+        {
+          id: '2-0',
+          data: {
+            chain: 'ethereum',
+            newState: 'CLOSED',
+            reason: 'recovered',
+            consecutiveFailures: '0',
+            timestamp: recentTimestamp,
+          },
+        },
+      ]);
+
+      const manager = createManager();
+      manager.initialize();
+
+      // Last event for ethereum is CLOSED, so nothing should be restored
+      const restored = await manager.restorePersistedState();
+      expect(restored).toBe(0);
+    });
+
+    it('should return 0 and log warning on Redis error', async () => {
+      mockStreamsClient.xread = jest.fn().mockRejectedValue(new Error('Redis connection lost'));
+
+      const manager = createManager();
+      manager.initialize();
+
+      const restored = await manager.restorePersistedState();
+      expect(restored).toBe(0);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Failed to restore circuit breaker states (non-fatal)',
+        expect.objectContaining({ error: 'Redis connection lost' }),
+      );
+    });
+  });
+
   describe('factory function', () => {
     it('should create a CircuitBreakerManager instance', () => {
       const manager = createCircuitBreakerManager({

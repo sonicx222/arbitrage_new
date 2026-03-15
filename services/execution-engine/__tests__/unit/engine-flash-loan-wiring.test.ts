@@ -285,6 +285,7 @@ describe('ExecutionEngineService FE-001 Flash Loan Wiring', () => {
 
     (createCircuitBreakerManager as unknown as jest.Mock).mockReturnValue({
       initialize: jest.fn(),
+      restorePersistedState: jest.fn().mockResolvedValue(0),
       getStatus: jest.fn().mockReturnValue({ state: 'CLOSED' }),
       recordSuccess: jest.fn(),
       recordFailure: jest.fn(),

@@ -649,6 +649,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
       // Analyze profitability (flash loan vs direct, accounting for fees)
       // P3-2 FIX: Use ?? to preserve 0 as a valid profit value
+      const tokenDecimals = opportunity.tokenIn ? getTokenDecimals(chain, opportunity.tokenIn) : 18;
       const profitAnalysis = this.analyzeProfitability({
         expectedProfitUsd: opportunity.expectedProfit ?? 0,
         flashLoanAmountWei: amountIn,
@@ -656,6 +657,8 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         gasPriceWei: gasPrice,
         chain,
         nativeTokenPriceUsd,
+        tokenDecimals,
+        borrowedTokenPriceUsd: opportunity.buyPrice ?? undefined,
       });
 
       if (!profitAnalysis.isProfitable) {
@@ -888,8 +891,13 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       return;
     }
 
-    const onChainProfitEth = parseFloat(ethers.formatEther(onChainProfit.expectedProfit));
-    const onChainProfitUsd = onChainProfitEth * nativeTokenPriceUsd;
+    // P2-1 FIX: Use token-specific decimals and price instead of formatEther + native price.
+    // For USDC (6 dec), formatEther(5_000_000) = 5e-12 — off by 10^12.
+    const buyChain = opportunity.buyChain ?? opportunity.sourceChain ?? '';
+    const tokenDec = opportunity.tokenIn ? getTokenDecimals(buyChain, opportunity.tokenIn) : 18;
+    const tokenPrice = opportunity.buyPrice && opportunity.buyPrice > 0 ? opportunity.buyPrice : nativeTokenPriceUsd;
+    const onChainProfitInTokens = parseFloat(ethers.formatUnits(onChainProfit.expectedProfit, tokenDec));
+    const onChainProfitUsd = onChainProfitInTokens * tokenPrice;
 
     // If on-chain profit is significantly lower than expected, log warning
     // P3-2 FIX: Use ?? to preserve 0 as a valid profit value
@@ -969,6 +977,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     // If simulation succeeded and returned gas estimates, verify profitability with actual gas
     if (simulationResult?.success && simulationResult.gasUsed) {
       const simulatedGasUnits = BigInt(simulationResult.gasUsed);
+      const revalidatedTokenDecimals = opportunity.tokenIn ? getTokenDecimals(chain, opportunity.tokenIn) : 18;
       const revalidatedProfit = this.analyzeProfitability({
         expectedProfitUsd: opportunity.expectedProfit ?? 0,
         flashLoanAmountWei: amountIn,
@@ -976,6 +985,8 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         gasPriceWei: gasPrice,
         chain,
         nativeTokenPriceUsd,
+        tokenDecimals: revalidatedTokenDecimals,
+        borrowedTokenPriceUsd: opportunity.buyPrice ?? undefined,
       });
 
       if (!revalidatedProfit.isProfitable) {
@@ -1055,9 +1066,10 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
       const selectedProtocol = providerSelection.protocol!;
 
-      // Look up selected protocol's address from multi-provider registry
+      // EE-P2-8 FIX: Build protocol→entry Map once for O(1) lookups (was O(n) .find()).
       const registryEntries = FLASH_LOAN_PROVIDER_REGISTRY[chain];
-      const registryEntry = registryEntries?.find(e => e.protocol === selectedProtocol);
+      const registryByProtocol = new Map(registryEntries?.map(e => [e.protocol, e]));
+      const registryEntry = registryByProtocol.get(selectedProtocol);
 
       if (!registryEntry) {
         // Selected protocol not in registry for this chain — try next alternative
@@ -1068,7 +1080,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
         // Selection-time fallback: try ranked alternatives
         for (const alt of providerSelection.rankedAlternatives) {
-          const altEntry = registryEntries?.find(e => e.protocol === alt.protocol);
+          const altEntry = registryByProtocol.get(alt.protocol);
           if (altEntry) {
             const fallbackProvider: IProviderInfo = {
               protocol: alt.protocol,
@@ -1177,8 +1189,19 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     let currentProvider = initialProvider;
     const MAX_ATTEMPTS = 2;
 
+    let currentGasPrice = gasPrice;
+    // EE-P2-8: Pre-build protocol→entry Map for O(1) fallback lookups
+    const fallbackRegistryEntries = FLASH_LOAN_PROVIDER_REGISTRY[chain];
+    const fallbackByProtocol = new Map(fallbackRegistryEntries?.map(e => [e.protocol, e]));
+
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
+        // P2-2 FIX: Re-fetch gas price on retry to avoid stale profitability analysis.
+        // Gas prices can spike significantly between attempts (block time = 2-12s).
+        if (attempt > 1) {
+          currentGasPrice = await this.getOptimalGasPrice(chain, ctx);
+        }
+
         // Core execution flow (same as non-fallback path)
         const [flashLoanTx, onChainProfit] = await Promise.all([
           this.prepareFlashLoanContractTransaction(opportunity, chain, ctx),
@@ -1190,13 +1213,16 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
         this.verifyOnChainProfitDivergence(opportunity, onChainProfit, nativeTokenPriceUsd);
 
+        const fallbackTokenDecimals = opportunity.tokenIn ? getTokenDecimals(chain, opportunity.tokenIn) : 18;
         const profitAnalysis = this.analyzeProfitability({
           expectedProfitUsd: opportunity.expectedProfit ?? 0,
           flashLoanAmountWei: BigInt(opportunity.amountIn ?? '0'),
           estimatedGasUnits: estimatedGas,
-          gasPriceWei: gasPrice,
+          gasPriceWei: currentGasPrice,
           chain,
           nativeTokenPriceUsd,
+          tokenDecimals: fallbackTokenDecimals,
+          borrowedTokenPriceUsd: opportunity.buyPrice ?? undefined,
         });
 
         if (!profitAnalysis.isProfitable) {
@@ -1218,14 +1244,14 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
         const simError = await this.simulateAndRevalidateProfitability(
           opportunity, flashLoanTx, chain, ctx,
-          BigInt(opportunity.amountIn ?? '0'), estimatedGas, gasPrice, nativeTokenPriceUsd
+          BigInt(opportunity.amountIn ?? '0'), estimatedGas, currentGasPrice, nativeTokenPriceUsd
         );
         if (simError) return simError;
 
         const protectedTx = await this.applyMEVProtection(flashLoanTx, chain, ctx);
 
         return await this.submitAndProcessFlashLoanResult(
-          opportunity, protectedTx, chain, ctx, gasPrice, currentProvider
+          opportunity, protectedTx, chain, ctx, currentGasPrice, currentProvider
         );
       } catch (error) {
         const errorMessage = getErrorMessage(error);
@@ -1276,9 +1302,8 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
           );
         }
 
-        // Resolve fallback provider from registry
-        const fallbackEntries = FLASH_LOAN_PROVIDER_REGISTRY[chain];
-        const fallbackEntry = fallbackEntries?.find(e => e.protocol === fallbackDecision.nextProtocol);
+        // Resolve fallback provider from registry (using pre-built Map above loop)
+        const fallbackEntry = fallbackByProtocol.get(fallbackDecision.nextProtocol!);
         if (!fallbackEntry) {
           this.logger.warn('Fallback provider not in registry', {
             chain, protocol: fallbackDecision.nextProtocol,

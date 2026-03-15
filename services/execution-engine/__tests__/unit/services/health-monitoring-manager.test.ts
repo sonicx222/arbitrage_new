@@ -60,6 +60,15 @@ jest.mock('@arbitrage/types', () => ({
     DLQ_ALERTS: 'stream:dlq-alerts',
     FORWARDING_DLQ: 'stream:forwarding-dlq',
   },
+  ConsumerGroups: {
+    EXECUTION_ENGINE: 'execution-engine-group',
+    CROSS_CHAIN_DETECTOR: 'cross-chain-detector-group',
+    COORDINATOR: 'coordinator-group',
+    MEMPOOL_DETECTOR: 'mempool-detector-group',
+    ORDERFLOW_PIPELINE: 'orderflow-pipeline',
+    SELF_HEALING: 'self-healing-manager',
+    SIMULATION_WORKER: 'simulation-worker-group',
+  },
 }));
 
 jest.mock('@arbitrage/core', () => ({
