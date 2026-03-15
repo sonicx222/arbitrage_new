@@ -23,6 +23,7 @@ import { RedisStreamsClient } from '@arbitrage/core/redis';
 import { getErrorMessage } from '@arbitrage/core/resilience';
 import type { Logger } from '../types';
 import { DLQ_STREAM } from '../types';
+import { validateMessageStructure } from './validation';
 
 // =============================================================================
 // Types
@@ -348,6 +349,24 @@ export class DlqConsumer {
       try {
         // Parse and replay the original payload
         const replayData = JSON.parse(candidate.data.originalPayload!) as Record<string, unknown>;
+
+        // P2-7 FIX: Re-validate replayed payload through validateMessageStructure()
+        // before injecting into the execution stream. Prevents corrupted or
+        // tampered DLQ entries from bypassing downstream validation.
+        // (HMAC signing also protects at the transport layer.)
+        const validation = validateMessageStructure({
+          id: candidate.id,
+          data: replayData,
+        });
+        if (!validation.valid) {
+          this.logger.warn('DLQ replay skipped — payload failed re-validation', {
+            messageId: candidate.id,
+            opportunityId: candidate.data.opportunityId,
+            validationCode: validation.code,
+            validationDetails: validation.details,
+          });
+          continue;
+        }
 
         // M-004 FIX: Check if the opportunity has expired before replaying.
         // Without this, expired messages create a DLQ → replay → DLQ loop
