@@ -113,6 +113,10 @@ System health status. Uses `validateHealthRequest` for query validation but does
 {
   "status": "healthy",
   "systemHealth": 95.5,
+  "uptime": 3600.5,
+  "isLeader": true,
+  "services": { "total": 6, "healthy": 6 },
+  "backpressure": null,
   "timestamp": 1740000000000
 }
 ```
@@ -125,9 +129,18 @@ System health status. Uses `validateHealthRequest` for query validation but does
   "isLeader": true,
   "instanceId": "coordinator-us-east1-abc-1740000000000",
   "systemHealth": 95.5,
+  "uptime": 3600.5,
   "services": {
-    "partition-asia-fast": { "status": "healthy", "..." : "..." },
-    "execution-engine": { "status": "healthy", "..." : "..." }
+    "summary": { "total": 6, "healthy": 6 },
+    "details": {
+      "partition-asia-fast": { "status": "healthy", "..." : "..." },
+      "execution-engine": { "status": "healthy", "..." : "..." }
+    }
+  },
+  "backpressure": null,
+  "streams": {
+    "dlq": { "total": 0, "expired": 0, "validation": 0, "transient": 0, "unknown": 0 },
+    "forwarding": null
   },
   "timestamp": 1740000000000
 }
@@ -145,13 +158,16 @@ Liveness probe. Always returns 200 if the process is running.
 
 #### GET /api/health/ready
 
-Readiness probe. Returns 200 when running and `systemHealth > 0`, otherwise 503.
+Readiness probe. Returns 200 when running, `systemHealth > 0`, Redis connected, and stream consumers active. Returns 503 otherwise.
 
 ```json
 {
   "status": "ready",
   "isRunning": true,
   "systemHealth": 95.5,
+  "redisConnected": true,
+  "streamConsumers": 10,
+  "consumersOk": true,
   "timestamp": 1740000000000
 }
 ```
@@ -192,7 +208,7 @@ Returns up to 100 recent alerts from alert history.
 {
   "isLeader": true,
   "instanceId": "coordinator-us-east1-abc-1740000000000",
-  "lockKey": "leader:coordinator"
+  "lockKey": "coordinator:leader:lock"
 }
 ```
 
@@ -269,7 +285,7 @@ Returns stream health metrics in Prometheus text exposition format (`text/plain;
 
 **Auth:** `DASHBOARD_AUTH_TOKEN` via query parameter (`?token=<token>`). Uses `crypto.timingSafeEqual` for timing-safe comparison.
 
-Server-Sent Events endpoint that streams real-time system data to the dashboard. The coordinator emits 9 event types at different intervals (all timer-based intervals configurable via `SSE_INTERVAL_*_MS` env vars):
+Server-Sent Events endpoint that streams real-time system data to the dashboard. The coordinator emits 10 event types at different intervals (all timer-based intervals configurable via `SSE_INTERVAL_*_MS` env vars):
 
 | Event | Default Frequency | Payload |
 |-------|-------------------|---------|
@@ -281,6 +297,7 @@ Server-Sent Events endpoint that streams real-time system data to the dashboard.
 | `cex-spread` | 10s | `CexSpreadData` — CEX-DEX spread stats, alerts, health snapshot (or `{ enabled: false }` when CEX signals disabled) |
 | `keepalive` | 15s | SSE comment (`: keepalive`) — prevents proxy/browser timeout disconnects |
 | `execution-result` | On event | `ExecutionResult` — individual trade result (success, profit, chain, tx hash) |
+| `opportunity-detected` | On event | `ArbitrageOpportunity` — newly detected opportunity (chain, pair, profit, type) |
 | `alert` | On event | `Alert` — system alert with type, severity, service, message |
 
 **Connection behavior:** EventSource auto-reconnects on failure. Dashboard resets state and backfills recent alerts via `GET /api/alerts` on reconnection.

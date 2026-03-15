@@ -43,11 +43,18 @@ export function getNonNegativeNumber(data: Record<string, unknown>, key: string,
 
 /**
  * Safely extract a boolean value from an object.
- * Returns the default value if the field is missing or not a boolean.
+ * Handles native booleans and string-encoded booleans from Redis
+ * stream deserialization (where all values arrive as strings).
+ * Returns the default value if the field is missing or unrecognized.
  */
 export function getBoolean(data: Record<string, unknown>, key: string, defaultValue: boolean = false): boolean {
   const value = data[key];
-  return typeof value === 'boolean' ? value : defaultValue;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+  }
+  return defaultValue;
 }
 
 /**

@@ -145,11 +145,19 @@ describe('type-guards', () => {
       expect(getBoolean({}, 'key', true)).toBe(true);
     });
 
+    it('should parse string "true" and "false" from Redis deserialization', () => {
+      expect(getBoolean({ key: 'true' }, 'key')).toBe(true);
+      expect(getBoolean({ key: 'false' }, 'key')).toBe(false);
+      expect(getBoolean({ key: 'false' }, 'key', true)).toBe(false);
+    });
+
     it('should return default for non-boolean types', () => {
-      expect(getBoolean({ key: 'true' }, 'key')).toBe(false);
       expect(getBoolean({ key: 1 }, 'key')).toBe(false);
       expect(getBoolean({ key: 0 }, 'key')).toBe(false);
       expect(getBoolean({ key: null }, 'key')).toBe(false);
+      expect(getBoolean({ key: 'yes' }, 'key')).toBe(false);
+      expect(getBoolean({ key: 'TRUE' }, 'key')).toBe(false);
+      expect(getBoolean({ key: '' }, 'key')).toBe(false);
     });
 
     it('should preserve false (not fall through to default)', () => {

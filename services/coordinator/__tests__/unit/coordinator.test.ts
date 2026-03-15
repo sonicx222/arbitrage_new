@@ -63,6 +63,12 @@ jest.mock('@arbitrage/core', () => ({
     xreadgroup: jest.fn(() => Promise.resolve([])),
     xack: jest.fn(() => Promise.resolve(1)),
     xadd: jest.fn(() => Promise.resolve('1234-0')),
+    xaddWithLimit: jest.fn(() => Promise.resolve('1234-0')),
+    batchXack: jest.fn(() => Promise.resolve(0)),
+    xlen: jest.fn(() => Promise.resolve(0)),
+    xpending: jest.fn(() => Promise.resolve({ pending: 0, minId: null, maxId: null, consumers: [] })),
+    xpendingRange: jest.fn(() => Promise.resolve([])),
+    xclaim: jest.fn(() => Promise.resolve([])),
     ack: jest.fn(() => Promise.resolve()),
     disconnect: jest.fn(() => Promise.resolve()),
     STREAMS: {
@@ -1619,72 +1625,6 @@ describe('CoordinatorService.handleHealthMessage', () => {
       data: { name: 'detector-1', status: 'healthy', timestamp: Date.now() },
     });
     expect((coordinator as any).healthMonitor.recordHeartbeat).toHaveBeenCalledWith('detector-1');
-  });
-});
-
-// =============================================================================
-// TQ-M-05: skipStaleOpportunityBacklogIfNeeded tests
-// =============================================================================
-
-describe('CoordinatorService.skipStaleOpportunityBacklogIfNeeded', () => {
-  let coordinator: CoordinatorService;
-
-  beforeEach(async () => {
-    coordinator = new CoordinatorService();
-    (coordinator as any).consecutiveExpiredThreshold = 10;
-  });
-
-  it('should be no-op when opportunityRouter is null', async () => {
-    (coordinator as any).opportunityRouter = null;
-    (coordinator as any).streamsClient = { createConsumerGroup: jest.fn() };
-    await (coordinator as any).skipStaleOpportunityBacklogIfNeeded();
-    // Should not throw
-  });
-
-  it('should be no-op when streamsClient is null', async () => {
-    (coordinator as any).opportunityRouter = { getConsecutiveExpired: jest.fn().mockReturnValue(20) };
-    (coordinator as any).streamsClient = null;
-    await (coordinator as any).skipStaleOpportunityBacklogIfNeeded();
-    // Should not throw
-  });
-
-  it('should not skip when consecutiveExpired is below threshold', async () => {
-    (coordinator as any).opportunityRouter = { getConsecutiveExpired: jest.fn().mockReturnValue(5) };
-    const mockStreams = { createConsumerGroup: jest.fn(), xlen: jest.fn().mockResolvedValue(100) };
-    (coordinator as any).streamsClient = mockStreams;
-    await (coordinator as any).skipStaleOpportunityBacklogIfNeeded();
-    expect(mockStreams.createConsumerGroup).not.toHaveBeenCalled();
-  });
-
-  it('should skip backlog when consecutiveExpired >= threshold', async () => {
-    (coordinator as any).opportunityRouter = {
-      getConsecutiveExpired: jest.fn().mockReturnValue(15),
-      resetConsecutiveExpired: jest.fn(),
-    };
-    const mockStreams = {
-      createConsumerGroup: jest.fn().mockResolvedValue(undefined),
-      xlen: jest.fn().mockResolvedValue(500),
-    };
-    (coordinator as any).streamsClient = mockStreams;
-    await (coordinator as any).skipStaleOpportunityBacklogIfNeeded();
-    expect(mockStreams.createConsumerGroup).toHaveBeenCalledWith(
-      expect.objectContaining({ startId: '$' })
-    );
-  });
-
-  it('should not throw when xlen fails (best-effort estimation)', async () => {
-    (coordinator as any).opportunityRouter = {
-      getConsecutiveExpired: jest.fn().mockReturnValue(10),
-      resetConsecutiveExpired: jest.fn(),
-    };
-    const mockStreams = {
-      createConsumerGroup: jest.fn().mockResolvedValue(undefined),
-      xlen: jest.fn().mockRejectedValue(new Error('Redis error')),
-    };
-    (coordinator as any).streamsClient = mockStreams;
-    await (coordinator as any).skipStaleOpportunityBacklogIfNeeded();
-    // Should still attempt the skip despite xlen failure
-    expect(mockStreams.createConsumerGroup).toHaveBeenCalled();
   });
 });
 

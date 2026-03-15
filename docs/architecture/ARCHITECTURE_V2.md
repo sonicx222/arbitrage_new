@@ -640,12 +640,12 @@ The hard rejection runs **before** any confidence calculation, ensuring that wha
 | `stream:volume-aggregates` | Detectors | Coordinator, Analyzer | ~20/min | 1 hour |
 | `stream:pending-opportunities` | Mempool Detector | Orderflow Pipeline | ~5/min | 1 hour |
 | `stream:health` | All | Coordinator | ~10/min | 1 hour |
-| `stream:health-alerts` | Health Monitor | Coordinator, Ops | ~5/hour | 24 hours |
-| `stream:service-health` | All Services | Coordinator | ~10/min | 1 hour |
-| `stream:service-events` | All Services | Coordinator, Ops | ~20/min | 1 hour |
-| `stream:coordinator-events` | Coordinator | Ops/Monitoring | ~10/min | 1 hour |
-| `stream:circuit-breaker` | Circuit Breaker Mgr | Coordinator, Ops | ~5/hour | 24 hours |
-| `stream:system-failover` | Coordinator | All Services | ~1/hour | 1 hour |
+| ~~`stream:health-alerts`~~ | *(Planned)* | — | — | — |
+| ~~`stream:service-health`~~ | *(Planned — see `stream:health` for current impl)* | — | — | — |
+| ~~`stream:service-events`~~ | *(Planned)* | — | — | — |
+| ~~`stream:coordinator-events`~~ | *(Planned)* | — | — | — |
+| ~~`stream:circuit-breaker`~~ | *(Planned)* | — | — | — |
+| ~~`stream:system-failover`~~ | *(Planned)* | — | — | — |
 | `stream:system-commands` | Ops/Admin | All Services | ~1/hour | 1 hour |
 | `stream:fast-lane` | Partition Detectors | Execution Engine | ~5/min | 1 hour |
 | `stream:dead-letter-queue` | All | Ops/Monitoring | ~1/hour | 7 days |

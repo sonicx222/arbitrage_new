@@ -701,10 +701,14 @@ export class CoordinatorService implements CoordinatorStateProvider {
     const chainGroupRoutingEnabled = process.env.COORDINATOR_CHAIN_GROUP_ROUTING === 'true';
     // ADR-037: Use dedicated streams client for forwarding writes to isolate
     // opportunity XADD from the shared connection used by other consumers.
+    const routerStreamsClient = this.opportunityStreamsClient ?? this.streamsClient;
+    if (!routerStreamsClient) {
+      throw new Error('OpportunityRouter requires a Redis streams client but none is available');
+    }
     this.opportunityRouter = new OpportunityRouter(
       this.logger,
       this.executionCircuitBreaker,
-      this.opportunityStreamsClient ?? this.streamsClient,
+      routerStreamsClient,
       {
         maxOpportunities: this.MAX_OPPORTUNITIES,
         opportunityTtlMs: this.OPPORTUNITY_TTL_MS,
@@ -2486,11 +2490,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
   /**
    * Get a snapshot of all service health statuses.
    *
-   * Returns a copy to prevent external mutation of internal state.
+   * Returns a read-only view of the live internal map. Values are mutable
+   * references — callers should not modify them. ReadonlyMap prevents
+   * structural changes (add/delete) at the TypeScript level.
    * Health statuses are updated via Redis Streams (ADR-002) from
    * each service's periodic health reports.
    *
-   * @returns Map of service name to health status
+   * @returns Read-only view of service name to health status (live references)
    * @see handleHealthMessage for how health is updated
    * @see ADR-002 for health reporting architecture
    */
