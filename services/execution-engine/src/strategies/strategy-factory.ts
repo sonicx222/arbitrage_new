@@ -45,7 +45,7 @@
  * - Production typically has: SimulationStrategy OFF, ISimulationService ON
  *
  * @see engine.ts (consumer)
- * @see ARCHITECTURE_V2.md Section 4.3 (Strategy Pattern)
+ * @see ARCHITECTURE_V2.md (Strategy Pattern)
  * @see types.ts SimulationConfig (for SimulationStrategy config)
  * @see services/simulation/types.ts ISimulationService (for pre-flight simulation)
  */

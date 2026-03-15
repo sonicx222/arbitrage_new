@@ -1393,4 +1393,126 @@ describe('ExecutionPipeline', () => {
       expect(recordProfitSlippage).not.toHaveBeenCalled();
     });
   });
+
+  // ===========================================================================
+  // P2-14: In-memory dedup (recentlyExecutedIds)
+  // ===========================================================================
+
+  describe('recentlyExecutedIds — in-memory dedup', () => {
+    let deps: ReturnType<typeof createMockDeps>;
+    let pipeline: ExecutionPipeline;
+
+    beforeEach(() => {
+      deps = createMockDeps();
+      pipeline = new ExecutionPipeline(deps);
+    });
+
+    it('should skip a previously-executed opportunity (dedup)', async () => {
+      const opp = createMockOpportunity({ id: 'dedup-1' });
+
+      // First execution — queue returns opp, then empty
+      deps.queueService.size
+        .mockReturnValueOnce(1)
+        .mockReturnValueOnce(0)
+        .mockReturnValue(0);
+      deps.queueService.dequeue.mockReturnValueOnce(opp);
+
+      pipeline.processQueueItems();
+      await flushMultiple();
+
+      expect(deps.strategyFactory.execute).toHaveBeenCalledTimes(1);
+      (deps.strategyFactory.execute as jest.Mock).mockClear();
+      (deps.opportunityConsumer.ackMessageAfterExecution as jest.Mock).mockClear();
+
+      // Second execution with same ID — should be deduped
+      deps.queueService.size
+        .mockReturnValueOnce(1)
+        .mockReturnValueOnce(0)
+        .mockReturnValue(0);
+      deps.queueService.dequeue.mockReturnValueOnce(createMockOpportunity({ id: 'dedup-1' }));
+
+      pipeline.processQueueItems();
+      await flushMultiple();
+
+      expect(deps.strategyFactory.execute).not.toHaveBeenCalled();
+      expect(deps.opportunityConsumer.ackMessageAfterExecution).toHaveBeenCalledWith('dedup-1');
+      expect(deps.logger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('already executed'),
+        expect.objectContaining({ opportunityId: 'dedup-1' }),
+      );
+    });
+
+    it('should allow execution of different opportunity IDs', async () => {
+      const oppA = createMockOpportunity({ id: 'opp-a' });
+      const oppB = createMockOpportunity({ id: 'opp-b' });
+
+      // Execute opp-a
+      deps.queueService.size
+        .mockReturnValueOnce(1)
+        .mockReturnValueOnce(0)
+        .mockReturnValue(0);
+      deps.queueService.dequeue.mockReturnValueOnce(oppA);
+
+      pipeline.processQueueItems();
+      await flushMultiple();
+
+      expect(deps.strategyFactory.execute).toHaveBeenCalledTimes(1);
+      (deps.strategyFactory.execute as jest.Mock).mockClear();
+
+      // Execute opp-b — different ID, should proceed
+      deps.queueService.size
+        .mockReturnValueOnce(1)
+        .mockReturnValueOnce(0)
+        .mockReturnValue(0);
+      deps.queueService.dequeue.mockReturnValueOnce(oppB);
+
+      pipeline.processQueueItems();
+      await flushMultiple();
+
+      expect(deps.strategyFactory.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('should evict oldest entry when reaching MAX_RECENTLY_EXECUTED_IDS (10000)', async () => {
+      // Fill the dedup set with 10000 entries
+      for (let i = 0; i < 10_000; i++) {
+        const opp = createMockOpportunity({ id: `fill-${i}` });
+        deps.queueService.size
+          .mockReturnValueOnce(1)
+          .mockReturnValueOnce(0);
+        deps.queueService.dequeue.mockReturnValueOnce(opp);
+
+        pipeline.processQueueItems();
+        await flushMultiple();
+      }
+
+      (deps.strategyFactory.execute as jest.Mock).mockClear();
+
+      // Add one more — should evict fill-0 (oldest)
+      const triggerOpp = createMockOpportunity({ id: 'trigger-eviction' });
+      deps.queueService.size
+        .mockReturnValueOnce(1)
+        .mockReturnValueOnce(0)
+        .mockReturnValue(0);
+      deps.queueService.dequeue.mockReturnValueOnce(triggerOpp);
+
+      pipeline.processQueueItems();
+      await flushMultiple();
+
+      expect(deps.strategyFactory.execute).toHaveBeenCalledTimes(1);
+      (deps.strategyFactory.execute as jest.Mock).mockClear();
+
+      // Now fill-0 should be evicted — re-executing it should succeed
+      const evictedOpp = createMockOpportunity({ id: 'fill-0' });
+      deps.queueService.size
+        .mockReturnValueOnce(1)
+        .mockReturnValueOnce(0)
+        .mockReturnValue(0);
+      deps.queueService.dequeue.mockReturnValueOnce(evictedOpp);
+
+      pipeline.processQueueItems();
+      await flushMultiple();
+
+      expect(deps.strategyFactory.execute).toHaveBeenCalledTimes(1);
+    }, 30_000);
+  });
 });

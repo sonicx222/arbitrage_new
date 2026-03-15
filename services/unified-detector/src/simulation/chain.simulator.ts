@@ -276,7 +276,8 @@ export class ChainSimulationHandler {
               const rawOut = Math.floor(outAmount * 10 ** decimals).toString();
               const txHash = `0x${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}`;
               const wallet = `0x${Math.random().toString(16).slice(2, 42).padEnd(40, '0')}`;
-              const pairAddr = `0x${(token0 + token1 + swapDex).split('').reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0).toString(16).padStart(40, '0')}`;
+              // P3-5 FIX: `>>> 0` converts signed int to unsigned, preventing `0x-...` invalid hex addresses.
+              const pairAddr = `0x${((token0 + token1 + swapDex).split('').reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0) >>> 0).toString(16).padStart(40, '0')}`;
 
               const swapEvent: SwapEvent = {
                 pairAddress: pairAddr,

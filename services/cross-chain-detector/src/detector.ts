@@ -26,8 +26,7 @@
  * 4. **Multi-Chain by Design**: BaseDetector = 1 chain per instance.
  *    CrossChainDetector = aggregates ALL chains in one instance.
  *
- * This architectural decision is documented here as there is no separate ADR.
- * FIX 2.1: Removed reference to non-existent ADR-003.
+ * This architectural decision is documented here (cross-chain aggregation is separate from ADR-003 partitioning).
  *
  * @see ADR-002: Redis Streams over Pub/Sub
  * @see ADR-007: Failover Strategy

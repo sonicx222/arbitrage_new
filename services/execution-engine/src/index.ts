@@ -512,13 +512,6 @@ async function main() {
     // SA-FIX: Use safeParseInt with NaN guard
     const drainTimeoutMs = safeParseInt(process.env.SHUTDOWN_DRAIN_TIMEOUT_MS, 30000);
     const POST_DRAIN_CLEANUP_BUFFER_MS = 15_000; // R2 upload, trade logger, consumers, Redis
-    // SA-1R-005 FIX: Validate shutdown timeout hierarchy at startup
-    const totalShutdownMs = drainTimeoutMs + POST_DRAIN_CLEANUP_BUFFER_MS;
-    if (totalShutdownMs <= drainTimeoutMs) {
-      logger.error('Invalid shutdown timeout hierarchy: total must exceed drain', {
-        drainTimeoutMs, postDrainBufferMs: POST_DRAIN_CLEANUP_BUFFER_MS, totalShutdownMs,
-      });
-    }
     setupServiceShutdown({
       logger,
       serviceName: 'Execution Engine',

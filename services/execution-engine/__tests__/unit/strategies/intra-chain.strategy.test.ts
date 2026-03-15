@@ -24,6 +24,16 @@ import {
 } from '@arbitrage/test-utils';
 import { createMockSimulationService } from '../../helpers/mock-factories';
 
+// Mock @arbitrage/config: override getCommitRevealContract for commit-reveal tests.
+// resetMocks: true in jest.config resets jest.fn() between tests, so the mock must
+// be re-applied in beforeEach (see commit-reveal describe block below).
+jest.mock('@arbitrage/config', () => ({
+  ...jest.requireActual('@arbitrage/config'),
+  getCommitRevealContract: jest.fn(() => '0xCR12345678901234567890123456789012345678'),
+}));
+
+import { getCommitRevealContract } from '@arbitrage/config';
+
 // =============================================================================
 // Mock Implementations (shared factories with local aliases)
 // =============================================================================
@@ -567,5 +577,262 @@ describe('IntraChainStrategy - Edge Cases', () => {
         chain: 'arbitrum',
       })
     );
+  });
+});
+
+// =============================================================================
+// Test Suite: Commit-Reveal MEV Protection (P2-13)
+// =============================================================================
+
+describe('IntraChainStrategy - Commit-Reveal MEV Protection', () => {
+  let strategy: IntraChainStrategy;
+  let mockLogger: Logger;
+  let mockCommitRevealService: any;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // Re-apply mock after resetMocks clears jest.fn() implementations
+    (getCommitRevealContract as jest.Mock).mockReturnValue('0xCR12345678901234567890123456789012345678');
+    mockLogger = createMockLogger();
+
+    mockCommitRevealService = {
+      commit: jest.fn().mockResolvedValue({
+        success: true,
+        commitmentHash: '0xcommithash',
+        txHash: '0xcommittx',
+        revealBlock: 100,
+      }),
+      reveal: jest.fn().mockResolvedValue({
+        success: true,
+        txHash: '0xrevealtx',
+        profit: 500000n, // in token units
+      }),
+      waitForRevealBlock: jest.fn().mockResolvedValue({ success: true }),
+      cancel: jest.fn().mockResolvedValue({ success: true }),
+    };
+  });
+
+  // Pass `false` to explicitly inject null commitRevealService (not the default mock).
+  // `null` can't be used as sentinel because `null ?? mockCommitRevealService` triggers ??
+  const setupStrategy = (commitRevealService?: any | false, mevRiskAnalyzer?: any) => {
+    const service = commitRevealService === false ? undefined : (commitRevealService ?? mockCommitRevealService);
+    strategy = new IntraChainStrategy(
+      mockLogger,
+      mevRiskAnalyzer,
+      service,
+    );
+
+    // Mock protected methods
+    jest.spyOn(strategy as any, 'prepareDexSwapTransaction').mockResolvedValue({
+      to: '0x1234567890123456789012345678901234567890',
+      data: '0xabcdef',
+      value: 0n,
+      from: '0x1234567890123456789012345678901234567890',
+    });
+    jest.spyOn(strategy as any, 'ensureTokenAllowance').mockResolvedValue(true);
+    jest.spyOn(strategy as any, 'verifyOpportunityPrices').mockResolvedValue({
+      valid: true,
+      currentProfit: 100,
+    });
+    jest.spyOn(strategy as any, 'getOptimalGasPrice').mockResolvedValue(30000000000n);
+    jest.spyOn(strategy as any, 'applyMEVProtection').mockImplementation(async (tx: any) => ({
+      ...tx,
+      gasPrice: 30000000000n,
+    }));
+    jest.spyOn(strategy as any, 'calculateActualProfit').mockResolvedValue(95);
+    jest.spyOn(strategy as any, 'isProviderHealthy').mockResolvedValue(true);
+    jest.spyOn(strategy as any, 'refreshGasPriceForSubmission').mockResolvedValue(30000000000n);
+  };
+
+  describe('shouldUseCommitReveal decision', () => {
+    it('should skip commit-reveal when feature flag is off', async () => {
+      // Mock shouldUseCommitReveal to return false (feature disabled)
+      setupStrategy();
+      jest.spyOn(strategy as any, 'shouldUseCommitReveal').mockResolvedValue({
+        shouldUse: false,
+        reason: 'Feature disabled (FEATURE_COMMIT_REVEAL=false)',
+      });
+
+      const ctx = createMockContext();
+      const opportunity = createMockOpportunity({ expectedProfit: 100 });
+
+      const result = await strategy.execute(opportunity, ctx);
+
+      // Should proceed with direct execution, not commit-reveal
+      expect(result.success).toBe(true);
+      expect(mockCommitRevealService.commit).not.toHaveBeenCalled();
+    });
+
+    it('should skip commit-reveal when risk score is below threshold', async () => {
+      setupStrategy();
+      jest.spyOn(strategy as any, 'shouldUseCommitReveal').mockResolvedValue({
+        shouldUse: false,
+        riskScore: 45,
+        reason: 'Low MEV risk (score: 45)',
+      });
+
+      const ctx = createMockContext();
+      const opportunity = createMockOpportunity({ expectedProfit: 100 });
+
+      const result = await strategy.execute(opportunity, ctx);
+
+      expect(result.success).toBe(true);
+      expect(mockCommitRevealService.commit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('executeWithCommitReveal', () => {
+    it('should execute full commit-reveal flow (commit → wait → reveal)', async () => {
+      setupStrategy();
+      jest.spyOn(strategy as any, 'shouldUseCommitReveal').mockResolvedValue({
+        shouldUse: true,
+        riskScore: 85,
+      });
+
+      const ctx = createMockContext();
+      const opportunity = createMockOpportunity({
+        expectedProfit: 100,
+        amountIn: '1000000000000000000', // 1 ETH in wei
+        buyPrice: 2000,
+      });
+
+      const result = await strategy.execute(opportunity, ctx);
+
+      expect(result.success).toBe(true);
+      expect(mockCommitRevealService.commit).toHaveBeenCalled();
+      expect(mockCommitRevealService.waitForRevealBlock).toHaveBeenCalledWith(
+        100, // revealBlock from commit result
+        'ethereum',
+        expect.anything()
+      );
+      expect(mockCommitRevealService.reveal).toHaveBeenCalledWith(
+        '0xcommithash',
+        'ethereum',
+        expect.anything()
+      );
+    });
+
+    it('should return error when commit fails', async () => {
+      setupStrategy();
+      jest.spyOn(strategy as any, 'shouldUseCommitReveal').mockResolvedValue({
+        shouldUse: true,
+        riskScore: 85,
+      });
+
+      mockCommitRevealService.commit.mockResolvedValue({
+        success: false,
+        error: 'Insufficient gas',
+      });
+
+      const ctx = createMockContext();
+      const opportunity = createMockOpportunity({
+        expectedProfit: 100,
+        amountIn: '1000000000000000000',
+        buyPrice: 2000,
+      });
+
+      const result = await strategy.execute(opportunity, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Commit failed');
+      expect(mockCommitRevealService.reveal).not.toHaveBeenCalled();
+    });
+
+    it('should return error and attempt cancel when reveal fails', async () => {
+      setupStrategy();
+      jest.spyOn(strategy as any, 'shouldUseCommitReveal').mockResolvedValue({
+        shouldUse: true,
+        riskScore: 85,
+      });
+
+      mockCommitRevealService.reveal.mockResolvedValue({
+        success: false,
+        error: 'Reveal expired',
+      });
+
+      const ctx = createMockContext();
+      const opportunity = createMockOpportunity({
+        expectedProfit: 100,
+        amountIn: '1000000000000000000',
+        buyPrice: 2000,
+      });
+
+      const result = await strategy.execute(opportunity, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Reveal failed');
+      expect(mockCommitRevealService.cancel).toHaveBeenCalledWith(
+        '0xcommithash',
+        'ethereum',
+        expect.anything()
+      );
+    });
+
+    it('should return error when block wait fails and attempt cancel', async () => {
+      setupStrategy();
+      jest.spyOn(strategy as any, 'shouldUseCommitReveal').mockResolvedValue({
+        shouldUse: true,
+        riskScore: 85,
+      });
+
+      mockCommitRevealService.waitForRevealBlock.mockResolvedValue({
+        success: false,
+        error: 'Block wait timeout',
+      });
+
+      const ctx = createMockContext();
+      const opportunity = createMockOpportunity({
+        expectedProfit: 100,
+        amountIn: '1000000000000000000',
+        buyPrice: 2000,
+      });
+
+      const result = await strategy.execute(opportunity, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Block wait failed');
+      expect(mockCommitRevealService.cancel).toHaveBeenCalled();
+      expect(mockCommitRevealService.reveal).not.toHaveBeenCalled();
+    });
+
+    it('should return error when commitRevealService is null', async () => {
+      setupStrategy(false); // no service — constructor falls back to null (feature flag off)
+      jest.spyOn(strategy as any, 'shouldUseCommitReveal').mockResolvedValue({
+        shouldUse: true,
+        riskScore: 85,
+      });
+
+      const ctx = createMockContext();
+      const opportunity = createMockOpportunity({
+        expectedProfit: 100,
+        amountIn: '1000000000000000000',
+        buyPrice: 2000,
+      });
+
+      const result = await strategy.execute(opportunity, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('CommitRevealService not initialized');
+    });
+
+    it('should return error when amountIn is missing or zero', async () => {
+      setupStrategy();
+      jest.spyOn(strategy as any, 'shouldUseCommitReveal').mockResolvedValue({
+        shouldUse: true,
+        riskScore: 85,
+      });
+
+      const ctx = createMockContext();
+      const opportunity = createMockOpportunity({
+        expectedProfit: 100,
+        amountIn: '0',
+        buyPrice: 2000,
+      });
+
+      const result = await strategy.execute(opportunity, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid amountIn');
+    });
   });
 });
